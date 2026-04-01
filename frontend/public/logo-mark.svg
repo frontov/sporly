@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220" fill="none">
+  <defs>
+    <linearGradient id="sporly-blue" x1="150" y1="45" x2="79" y2="117" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14B2F1"/>
+      <stop offset="0.52" stop-color="#0D8ED0"/>
+      <stop offset="1" stop-color="#0C4A73"/>
+    </linearGradient>
+    <linearGradient id="sporly-green" x1="142" y1="101" x2="74" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0BB35E"/>
+      <stop offset="0.55" stop-color="#2CB94E"/>
+      <stop offset="1" stop-color="#8ED043"/>
+    </linearGradient>
+  </defs>
+  <path
+    d="M170 38C149 40 129 45 111 54C91 64 74 78 67 94C61 107 66 119 82 124C88 126 96 127 106 127C93 119 88 111 89 101C91 79 121 58 170 38Z"
+    fill="url(#sporly-blue)"
+  />
+  <path
+    d="M67 94C62 100 60 108 62 114C64 122 70 128 81 131C84 127 86 123 87 119C70 114 64 105 67 94Z"
+    fill="#0A456B"
+  />
+  <path
+    d="M104 123C114 129 116 137 111 148C104 164 82 177 40 188C58 188 76 186 93 181C114 175 132 166 145 154C159 141 165 126 161 114C158 104 149 96 133 93C145 100 149 108 147 118C144 136 126 152 104 123Z"
+    fill="url(#sporly-green)"
+  />
+  <path
+    d="M111 148C111 148 122 163 145 154C126 169 104 178 79 183C95 177 106 164 111 148Z"
+    fill="#66C93E"
+  />
+</svg>

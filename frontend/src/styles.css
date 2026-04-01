@@ -51,8 +51,21 @@ a {
   margin-bottom: 14px;
 }
 
+.hero__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hero__logo {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 6px 14px rgba(16, 77, 104, 0.1));
+}
+
 .hero__brand-text {
-  margin: 2px 0 0;
+  margin: 4px 0 0 56px;
   color: var(--text-muted);
   font-size: 0.96rem;
 }
@@ -62,6 +75,22 @@ a {
   font-size: clamp(1.8rem, 4vw, 2.6rem);
   line-height: 0.95;
   letter-spacing: -0.05em;
+}
+
+@media (max-width: 640px) {
+  .hero__brand {
+    gap: 10px;
+  }
+
+  .hero__logo {
+    width: 38px;
+    height: 38px;
+  }
+
+  .hero__brand-text {
+    margin-left: 48px;
+    font-size: 0.9rem;
+  }
 }
 
 .hero__stats {

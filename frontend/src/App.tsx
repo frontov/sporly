@@ -112,7 +112,10 @@ function App() {
   return (
     <div className="page-shell">
       <header className="hero">
-        <h1>sporly</h1>
+        <div className="hero__brand">
+          <img className="hero__logo" src="/logo-mark.svg" alt="" aria-hidden="true" />
+          <h1>sporly</h1>
+        </div>
         <p className="hero__brand-text">поиск спортивных событий</p>
       </header>
       <FiltersPanel
