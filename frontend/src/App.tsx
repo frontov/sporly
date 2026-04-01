@@ -112,17 +112,8 @@ function App() {
   return (
     <div className="page-shell">
       <header className="hero">
-        <div className="hero__brand">
-          <span className="hero__brand-mark">s</span>
-          <div>
-            <p className="hero__eyebrow">sporly</p>
-            <p className="hero__brand-text">поиск спортивных событий</p>
-          </div>
-        </div>
-
-        <div className="hero__copy">
-          <h1>Sporly</h1>
-        </div>
+        <h1>sporly</h1>
+        <p className="hero__brand-text">поиск спортивных событий</p>
       </header>
       <FiltersPanel
         filters={filters}

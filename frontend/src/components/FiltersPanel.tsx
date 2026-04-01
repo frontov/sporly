@@ -19,6 +19,8 @@ export const FiltersPanel = ({
   onChange,
   onReset
 }: FiltersPanelProps) => {
+  const isMobileViewport =
+    typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
   const [regionDraft, setRegionDraft] = useState("");
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const normalizedCategories = filters.categories.map(
@@ -35,13 +37,13 @@ export const FiltersPanel = ({
   const activeFiltersCount = activeFilterLabels.length;
   const summaryText =
     activeFiltersCount > 0 ? activeFilterLabels.join(" • ") : "ближайшие события";
-  const [isOpen, setIsOpen] = useState(activeFiltersCount > 0);
+  const [isOpen, setIsOpen] = useState(activeFiltersCount > 0 && !isMobileViewport);
 
   useEffect(() => {
-    if (activeFiltersCount > 0) {
+    if (activeFiltersCount > 0 && !isMobileViewport) {
       setIsOpen(true);
     }
-  }, [activeFiltersCount]);
+  }, [activeFiltersCount, isMobileViewport]);
 
   useEffect(() => {
     if (filters.cities.length > 0 || Boolean(filters.q) || filters.includePast) {
