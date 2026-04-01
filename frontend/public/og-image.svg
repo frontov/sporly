@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7F8F4"/>
+      <stop offset="1" stop-color="#EEF2E7"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(164 118) rotate(29.7) scale(405 228)">
+      <stop stop-color="#C5E594" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#C5E594" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1070 84) rotate(144.3) scale(282 172)">
+      <stop stop-color="#BFD9CA" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#BFD9CA" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="markBlue" x1="764" y1="183" x2="615" y2="334" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14B2F1"/>
+      <stop offset=".52" stop-color="#0D8ED0"/>
+      <stop offset="1" stop-color="#0C4A73"/>
+    </linearGradient>
+    <linearGradient id="markGreen" x1="746" y1="322" x2="602" y2="486" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0BB35E"/>
+      <stop offset=".55" stop-color="#2CB94E"/>
+      <stop offset="1" stop-color="#8ED043"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="164" cy="118" r="232" fill="url(#glowA)"/>
+  <circle cx="1070" cy="84" r="176" fill="url(#glowB)"/>
+  <g transform="translate(80 98)">
+    <path d="M733 82C674 87 618 101 566 128C509 156 462 196 441 242C423 279 438 314 483 328C501 333 524 336 551 335C514 313 500 289 504 260C511 200 596 140 733 82Z" fill="url(#markBlue)"/>
+    <path d="M441 242C425 259 419 280 424 298C430 321 448 339 479 347C489 336 494 325 499 312C450 298 432 272 441 242Z" fill="#0A456B"/>
+    <path d="M545 324C572 339 577 362 562 391C540 435 479 472 360 503C413 503 463 497 510 484C570 467 620 441 656 407C695 371 711 331 700 297C691 269 666 245 619 236C654 256 666 279 660 305C651 352 599 396 545 324Z" fill="url(#markGreen)"/>
+    <path d="M562 391C562 391 594 435 656 407C606 447 543 473 472 488C516 469 546 431 562 391Z" fill="#66C93E"/>
+  </g>
+  <g transform="translate(108 196)">
+    <text x="0" y="0" fill="#13211C" font-size="124" font-family="Manrope, Arial, sans-serif" font-weight="800" letter-spacing="-5">sporly</text>
+    <text x="4" y="96" fill="#13211C" font-size="58" font-family="Manrope, Arial, sans-serif" font-weight="700" letter-spacing="-1.5">поиск спортивных событий</text>
+    <text x="4" y="160" fill="#5F7168" font-size="42" font-family="Manrope, Arial, sans-serif" font-weight="600" letter-spacing="-0.8">Все старты в одном месте</text>
+  </g>
+</svg>

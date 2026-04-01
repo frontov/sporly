@@ -1,0 +1,20 @@
+{
+  "name": "Sporly",
+  "short_name": "Sporly",
+  "description": "Поиск спортивных событий по датам, регионам и видам спорта.",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F7F8F4",
+  "theme_color": "#13211C",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
+
