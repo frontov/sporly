@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: sporly-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      CORS_ORIGINS: http://localhost:8080
+      CACHE_TTL_SECONDS: 300
+    volumes:
+      - ./backend/app/data:/app/app/data
+      - ./backend/app/config/sources.json:/app/app/config/sources.json:ro
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: sporly-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"

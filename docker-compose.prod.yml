@@ -1,0 +1,53 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: sporly-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      CORS_ORIGINS: https://${DOMAIN},https://www.${DOMAIN}
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-300}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-15}
+      SOURCE_TIMEOUT_SECONDS: ${SOURCE_TIMEOUT_SECONDS:-45}
+      ENRICH_TIMEOUT_SECONDS: ${ENRICH_TIMEOUT_SECONDS:-12}
+      MAX_CONCURRENT_SOURCES: ${MAX_CONCURRENT_SOURCES:-2}
+      MAX_ENRICH_EVENTS_PER_SOURCE: ${MAX_ENRICH_EVENTS_PER_SOURCE:-120}
+      MINIMUM_REFRESH_RATIO: ${MINIMUM_REFRESH_RATIO:-0.7}
+    volumes:
+      - ./backend/app/data:/app/app/data
+      - ./backend/app/config/sources.json:/app/app/config/sources.json:ro
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: sporly-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: sporly-caddy
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

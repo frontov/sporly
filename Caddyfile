@@ -1,0 +1,8 @@
+{$DOMAIN} {
+  encode zstd gzip
+  reverse_proxy frontend:80
+}
+
+www.{$DOMAIN} {
+  redir https://{$DOMAIN}{uri} permanent
+}

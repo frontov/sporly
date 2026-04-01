@@ -1,0 +1,206 @@
+{
+  "sources": [
+    {
+      "name": "REGPLACE",
+      "base_url": "https://reg.place",
+      "listing_urls": [
+        "https://reg.place/"
+      ],
+      "enabled": true,
+      "parser_type": "reg_place",
+      "pagination_selector": ".pagination .page-link",
+      "max_pages": 10,
+      "selectors": {
+        "item": ".b-event-card",
+        "title": "h3 a",
+        "link": "h3 a",
+        "date": ".text-muted.mb-3",
+        "description": "p.mb-3.text-secondary",
+        "image": ".b-event-card__image"
+      }
+    },
+    {
+      "name": "Russialoppet",
+      "base_url": "https://russialoppet.ru",
+      "listing_urls": [
+        "https://russialoppet.ru/events/2026/"
+      ],
+      "enabled": true,
+      "parser_type": "russialoppet",
+      "selectors": {
+        "item": "li",
+        "title": "a",
+        "link": "a"
+      }
+    },
+    {
+      "name": "Russia Running",
+      "base_url": "https://russiarunning.com",
+      "listing_urls": [
+        "https://russiarunning.com/fs/series"
+      ],
+      "enabled": true,
+      "parser_type": "russiarunning_series",
+      "selectors": {
+        "item": ".event-info li",
+        "title": "a",
+        "link": "a"
+      }
+    },
+    {
+      "name": "Orgeo",
+      "base_url": "https://orgeo.ru",
+      "listing_urls": [
+        "https://orgeo.ru/event"
+      ],
+      "enabled": true,
+      "parser_type": "orgeo",
+      "pagination_selector": ".pagination a",
+      "max_pages": 5,
+      "selectors": {
+        "item": "td.event_view_td.hidden-xs",
+        "title": "td.td_block > a",
+        "link": "td.td_block > a",
+        "date": "b.hidden-xs.no_wrap",
+        "description": ".hint",
+        "image": "img.logo-inline"
+      }
+    },
+    {
+      "name": "Running Community",
+      "base_url": "https://runc.run",
+      "listing_urls": [
+        "https://runc.run"
+      ],
+      "enabled": true,
+      "parser_type": "runc",
+      "selectors": {
+        "item": ".header-menu-sub-menu-race-item",
+        "title": ".header-menu-sub-menu-race-item__race-name",
+        "link": ".header-menu-sub-menu-race-item__race-name",
+        "date": ".header-menu-sub-menu-race-item__date"
+      }
+    },
+    {
+      "name": "Arta Sport",
+      "base_url": "https://arta-sport.ru",
+      "listing_urls": [
+        "https://arta-sport.ru"
+      ],
+      "enabled": true,
+      "parser_type": "arta_sport",
+      "selectors": {
+        "item": "ul.bl_mer > li.item",
+        "title": ".caption",
+        "link": "a[href]:not(.reg_btn)",
+        "date": ".data",
+        "venue": ".adr"
+      }
+    },
+    {
+      "name": "Marzocchi Cup",
+      "base_url": "https://cup.marzocchi.ru",
+      "listing_urls": [
+        "https://cup.marzocchi.ru/registratsiya/"
+      ],
+      "enabled": true,
+      "parser_type": "marzocchi_cup",
+      "selectors": {
+        "item": "a",
+        "title": "span",
+        "link": "a"
+      }
+    },
+    {
+      "name": "Gran Fondo",
+      "base_url": "https://www.granfondo.ru",
+      "listing_urls": [
+        "https://www.granfondo.ru"
+      ],
+      "enabled": true,
+      "parser_type": "granfondo",
+      "selectors": {
+        "item": ".thumbnail-list-main > li",
+        "title": ".caption h4",
+        "link": "a.thumbnail"
+      }
+    },
+    {
+      "name": "CyclingRace",
+      "base_url": "https://cyclingrace.ru",
+      "listing_urls": [
+        "https://cyclingrace.ru"
+      ],
+      "enabled": true,
+      "parser_type": "cyclingrace",
+      "selectors": {
+        "item": "#race section a[href]",
+        "title": "div.weight-normal p:nth-of-type(1)",
+        "link": "a[href]",
+        "date": "div.weight-normal p:nth-of-type(2)",
+        "city": "div.weight-normal p:nth-of-type(3)"
+      }
+    },
+    {
+      "name": "O-Time",
+      "base_url": "https://reg.o-time.ru",
+      "listing_urls": [
+        "https://reg.o-time.ru/calendar"
+      ],
+      "enabled": true,
+      "parser_type": "otime_calendar",
+      "selectors": {
+        "item": "div.all",
+        "title": "article.allname a",
+        "link": "article.allname a"
+      }
+    },
+    {
+      "name": "Marathon Cup",
+      "base_url": "https://marathoncup.ru",
+      "listing_urls": [
+        "https://marathoncup.ru"
+      ],
+      "enabled": true,
+      "parser_type": "marathoncup",
+      "selectors": {
+        "item": "a.elementor-cta",
+        "title": ".elementor-cta__title",
+        "link": "a.elementor-cta"
+      }
+    },
+    {
+      "name": "Galtropa",
+      "base_url": "https://galtropa.ru",
+      "listing_urls": [
+        "https://galtropa.ru/city-marathon",
+        "https://galtropa.ru/sportfest",
+        "https://galtropa.ru/ski-marathon",
+        "https://galtropa.ru/rogaine",
+        "https://galtropa.ru/snow-kite",
+        "https://galtropa.ru/velomarathon"
+      ],
+      "enabled": true,
+      "parser_type": "galtropa",
+      "selectors": {
+        "item": "h1.t338__title",
+        "title": "h1.t338__title",
+        "link": "a[href]"
+      }
+    },
+    {
+      "name": "Nezhesteam",
+      "base_url": "https://nezhesteam.ru",
+      "listing_urls": [
+        "https://nezhesteam.ru/?year=2026"
+      ],
+      "enabled": true,
+      "parser_type": "nezhesteam",
+      "selectors": {
+        "item": "#content .col-lg-4",
+        "title": "h3",
+        "link": "a[href]"
+      }
+    }
+  ]
+}

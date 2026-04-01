@@ -1,0 +1,115 @@
+{
+  "sources": [
+    {
+      "name": "REGPLACE",
+      "base_url": "https://reg.place",
+      "listing_urls": [
+        "https://reg.place/"
+      ],
+      "enabled": true,
+      "parser_type": "reg_place",
+      "pagination_selector": ".pagination .page-link",
+      "max_pages": 10,
+      "selectors": {
+        "item": ".b-event-card",
+        "title": "h3 a",
+        "link": "h3 a",
+        "date": ".text-muted.mb-3",
+        "description": "p.mb-3.text-secondary",
+        "image": ".b-event-card__image"
+      }
+    },
+    {
+      "name": "Russialoppet",
+      "base_url": "https://russialoppet.ru",
+      "listing_urls": [
+        "https://russialoppet.ru/events/2026/"
+      ],
+      "enabled": true,
+      "parser_type": "russialoppet",
+      "selectors": {
+        "item": "li",
+        "title": "a",
+        "link": "a"
+      }
+    },
+    {
+      "name": "Russia Running",
+      "base_url": "https://russiarunning.com",
+      "listing_urls": [
+        "https://russiarunning.com/fs/series"
+      ],
+      "enabled": true,
+      "parser_type": "russiarunning_series",
+      "selectors": {
+        "item": ".event-info li",
+        "title": "a",
+        "link": "a"
+      }
+    },
+    {
+      "name": "Orgeo",
+      "base_url": "https://orgeo.ru",
+      "listing_urls": [
+        "https://orgeo.ru/event"
+      ],
+      "enabled": true,
+      "parser_type": "orgeo",
+      "pagination_selector": ".pagination a",
+      "max_pages": 5,
+      "selectors": {
+        "item": "td.event_view_td.hidden-xs",
+        "title": "td.td_block > a",
+        "link": "td.td_block > a",
+        "date": "b.hidden-xs.no_wrap",
+        "description": ".hint",
+        "image": "img.logo-inline"
+      }
+    },
+    {
+      "name": "Running Community",
+      "base_url": "https://runc.run",
+      "listing_urls": [
+        "https://runc.run"
+      ],
+      "enabled": true,
+      "parser_type": "runc",
+      "selectors": {
+        "item": ".header-menu-sub-menu-race-item",
+        "title": ".header-menu-sub-menu-race-item__race-name",
+        "link": ".header-menu-sub-menu-race-item__race-name",
+        "date": ".header-menu-sub-menu-race-item__date"
+      }
+    },
+    {
+      "name": "Arta Sport",
+      "base_url": "https://arta-sport.ru",
+      "listing_urls": [
+        "https://arta-sport.ru"
+      ],
+      "enabled": true,
+      "parser_type": "arta_sport",
+      "selectors": {
+        "item": "ul.bl_mer > li.item",
+        "title": ".caption",
+        "link": "a[href]:not(.reg_btn)",
+        "date": ".data",
+        "venue": ".adr"
+      }
+    },
+    {
+      "name": "Marzocchi Cup",
+      "base_url": "https://cup.marzocchi.ru",
+      "listing_urls": [
+        "https://cup.marzocchi.ru/registratsiya/"
+      ],
+      "enabled": true,
+      "parser_type": "marzocchi_cup",
+      "selectors": {
+        "item": "a",
+        "title": "span",
+        "link": "a"
+      }
+    }
+  ]
+}
