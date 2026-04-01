@@ -181,10 +181,22 @@ function App() {
         </nav>
       ) : null}
 
+      <section className="seo-copy" aria-labelledby="seo-copy-title">
+        <h2 id="seo-copy-title">Спортивные события в одном каталоге</h2>
+        <p>
+          Sporly помогает находить забеги, велогонки, лыжные марафоны, триатлон,
+          ориентирование и другие старты по России и ближнему зарубежью в одном месте.
+        </p>
+        <p>
+          Здесь можно быстро выбрать регион, даты и вид спорта, чтобы найти подходящие
+          соревнования, фестивали и старты из разных источников в едином формате.
+        </p>
+      </section>
+
       <footer className="site-footer">
         <span className="site-footer__brand">sporly</span>
         <span className="site-footer__item">
-          поиск спортивных событий по датам, городам и видам спорта в одном едином каталоге
+          помогаем искать спортивные события с 2026 года
         </span>
         <a className="site-footer__link" href={`mailto:${FOOTER_CONTACTS.email}`}>
           почта

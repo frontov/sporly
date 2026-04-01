@@ -467,6 +467,34 @@ a {
   max-width: 100%;
 }
 
+.seo-copy {
+  margin: 34px auto 10px;
+  padding: 22px 22px 20px;
+  max-width: 74ch;
+  color: var(--text-muted);
+  border-top: 1px solid rgba(19, 33, 28, 0.08);
+  border-bottom: 1px solid rgba(19, 33, 28, 0.06);
+  text-align: left;
+}
+
+.seo-copy h2 {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-size: 1.05rem;
+  line-height: 1.24;
+  letter-spacing: -0.025em;
+}
+
+.seo-copy p {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.seo-copy p:last-child {
+  margin-bottom: 0;
+}
+
 .state-banner--error {
   border-color: rgba(255, 127, 127, 0.35);
 }
@@ -1142,6 +1170,15 @@ code {
     margin-top: 0;
     margin-bottom: 20px;
     font-size: 0.9rem;
+  }
+
+  .seo-copy {
+    margin: 36px auto 12px;
+    padding: 24px 24px 22px;
+  }
+
+  .seo-copy h2 {
+    font-size: 1.08rem;
   }
 
   .events-grid {
