@@ -37,13 +37,7 @@ export const FiltersPanel = ({
   const activeFiltersCount = activeFilterLabels.length;
   const summaryText =
     activeFiltersCount > 0 ? activeFilterLabels.join(" • ") : "ближайшие события";
-  const [isOpen, setIsOpen] = useState(activeFiltersCount > 0 && !isMobileViewport);
-
-  useEffect(() => {
-    if (activeFiltersCount > 0 && !isMobileViewport) {
-      setIsOpen(true);
-    }
-  }, [activeFiltersCount, isMobileViewport]);
+  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     if (filters.cities.length > 0 || Boolean(filters.q) || filters.includePast) {

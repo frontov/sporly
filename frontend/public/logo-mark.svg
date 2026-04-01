@@ -1,30 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none">
   <defs>
-    <linearGradient id="sporly-blue" x1="150" y1="45" x2="79" y2="117" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#14B2F1"/>
-      <stop offset="0.52" stop-color="#0D8ED0"/>
-      <stop offset="1" stop-color="#0C4A73"/>
+    <linearGradient id="sporlyS" x1="56" y1="44" x2="188" y2="196" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10B8F5"/>
+      <stop offset="0.48" stop-color="#1694DF"/>
+      <stop offset="1" stop-color="#5BC648"/>
     </linearGradient>
-    <linearGradient id="sporly-green" x1="142" y1="101" x2="74" y2="180" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0BB35E"/>
-      <stop offset="0.55" stop-color="#2CB94E"/>
-      <stop offset="1" stop-color="#8ED043"/>
-    </linearGradient>
+    <filter id="sporlyShadow" x="28" y="22" width="184" height="204" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="10"/>
+      <feGaussianBlur stdDeviation="10"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.045 0 0 0 0 0.16 0 0 0 0 0.2 0 0 0 0.14 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_1" result="shape"/>
+    </filter>
   </defs>
-  <path
-    d="M170 38C149 40 129 45 111 54C91 64 74 78 67 94C61 107 66 119 82 124C88 126 96 127 106 127C93 119 88 111 89 101C91 79 121 58 170 38Z"
-    fill="url(#sporly-blue)"
-  />
-  <path
-    d="M67 94C62 100 60 108 62 114C64 122 70 128 81 131C84 127 86 123 87 119C70 114 64 105 67 94Z"
-    fill="#0A456B"
-  />
-  <path
-    d="M104 123C114 129 116 137 111 148C104 164 82 177 40 188C58 188 76 186 93 181C114 175 132 166 145 154C159 141 165 126 161 114C158 104 149 96 133 93C145 100 149 108 147 118C144 136 126 152 104 123Z"
-    fill="url(#sporly-green)"
-  />
-  <path
-    d="M111 148C111 148 122 163 145 154C126 169 104 178 79 183C95 177 106 164 111 148Z"
-    fill="#66C93E"
-  />
+  <g filter="url(#sporlyShadow)">
+    <path
+      d="M171 58C159 46 142 40 123 40C88 40 61 59 61 87C61 115 82 127 110 135C131 141 145 146 145 159C145 173 130 182 108 182C88 182 70 175 57 161"
+      stroke="url(#sporlyS)"
+      stroke-width="24"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M69 182C82 194 99 200 118 200C153 200 180 181 180 153C180 125 159 113 131 105C110 99 96 94 96 81C96 67 111 58 133 58C153 58 171 65 183 79"
+      stroke="url(#sporlyS)"
+      stroke-width="24"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
 </svg>

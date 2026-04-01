@@ -16,12 +16,19 @@ const initialFilters: FiltersState = {
 };
 
 const FILTERS_STORAGE_KEY = "sporly.filters";
-const isRegionOption = (value: string) =>
-  /(область|край|республика|автономный округ)$/i.test(value) ||
-  value === "Москва" ||
-  value === "Санкт-Петербург" ||
-  value === "Севастополь";
-const isLegacyCombinedRegion = (value: string) => value.includes(" и ");
+const isPureRegionOption = (value: string) => {
+  const normalized = value.trim();
+  if (!normalized || normalized.includes(",") || normalized.includes(" и ")) {
+    return false;
+  }
+
+  return (
+    /(область|край|республика|автономный округ)$/i.test(normalized) ||
+    normalized === "Москва" ||
+    normalized === "Санкт-Петербург" ||
+    normalized === "Севастополь"
+  );
+};
 const PINNED_REGIONS = [
   "Москва",
   "Московская область",
@@ -94,7 +101,8 @@ function App() {
   const [page, setPage] = useState(1);
   const { data, loading, error } = useEvents(filters, page);
   const availableRegions = data.available_cities
-    .filter((value) => isRegionOption(value) && !isLegacyCombinedRegion(value));
+    .filter(isPureRegionOption)
+    .sort((left, right) => left.localeCompare(right, "ru"));
   const popularRegions = [
     ...PINNED_REGIONS.filter((region) => availableRegions.includes(region)),
     ...availableRegions.filter((region) => !PINNED_REGIONS.includes(region))

@@ -170,6 +170,93 @@
       }
     },
     {
+      "name": "MyRace",
+      "base_url": "https://myrace.info",
+      "listing_urls": [
+        "https://myrace.info/take/2026"
+      ],
+      "enabled": true,
+      "parser_type": "myrace",
+      "selectors": {
+        "item": "a.events-list__item.row",
+        "title": "h2",
+        "link": "a.events-list__item.row"
+      }
+    },
+    {
+      "name": "IRONSTAR",
+      "base_url": "https://iron-star.com",
+      "listing_urls": [
+        "https://iron-star.com/event/"
+      ],
+      "enabled": true,
+      "parser_type": "ironstar",
+      "selectors": {
+        "item": "a.event-item",
+        "title": ".title",
+        "link": "a.event-item",
+        "date": ".event-head-info .date",
+        "city": ".event-head-info .place",
+        "image": ".event-image img"
+      }
+    },
+    {
+      "name": "Golden Ultra",
+      "base_url": "https://goldenultra.ru",
+      "listing_urls": [
+        "https://goldenultra.ru"
+      ],
+      "enabled": true,
+      "parser_type": "goldenultra",
+      "selectors": {
+        "item": "a[href]",
+        "title": "a[href]",
+        "link": "a[href]"
+      }
+    },
+    {
+      "name": "ARF",
+      "base_url": "https://www.arf.by",
+      "listing_urls": [
+        "https://www.arf.by/?index=calendar"
+      ],
+      "enabled": true,
+      "parser_type": "arf_calendar",
+      "selectors": {
+        "item": ".nav-item",
+        "title": "a.short-news-link",
+        "link": "a.short-news-link"
+      }
+    },
+    {
+      "name": "Velogearance",
+      "base_url": "https://velogearance.ru",
+      "listing_urls": [
+        "https://velogearance.ru/category/races/"
+      ],
+      "enabled": true,
+      "parser_type": "velogearance",
+      "selectors": {
+        "item": "article.post",
+        "title": ".entry-title a",
+        "link": ".entry-title a"
+      }
+    },
+    {
+      "name": "XCnews",
+      "base_url": "http://www.xcnews.ru",
+      "listing_urls": [
+        "http://www.xcnews.ru/calendar/"
+      ],
+      "enabled": true,
+      "parser_type": "xcnews",
+      "selectors": {
+        "item": "table tr",
+        "title": "td:nth-of-type(2) a",
+        "link": "td:nth-of-type(2) a"
+      }
+    },
+    {
       "name": "Galtropa",
       "base_url": "https://galtropa.ru",
       "listing_urls": [

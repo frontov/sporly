@@ -7,17 +7,22 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import re
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
 from app.parsers.base import (
     ArtaSportParser,
+    ArfCalendarParser,
     CyclingRaceParser,
     CssDirectoryParser,
     GaltropaParser,
+    GoldenUltraParser,
     GranFondoParser,
+    IronStarParser,
     MarzocchiCupParser,
     MarathonCupParser,
+    MyRaceParser,
     NezhesteamParser,
     OTimeCalendarParser,
     OrgeoParser,
@@ -27,6 +32,8 @@ from app.parsers.base import (
     RussialoppetParser,
     SourceConfig,
     SourceFieldMap,
+    VelogearanceParser,
+    XCNewsParser,
 )
 from app.schemas.event import Event
 from app.settings import settings
@@ -44,6 +51,18 @@ class EventFilters:
 
 
 class CatalogService:
+    SOURCE_PRIORITY: dict[str, int] = {
+        "MyRace": 6,
+        "O-Time": 6,
+        "REGPLACE": 5,
+        "Russia Running": 5,
+        "IRONSTAR": 5,
+        "Orgeo": 4,
+        "Golden Ultra": 4,
+        "Velogearance": 4,
+        "XCnews": 4,
+        "ARF": 4,
+    }
     REGION_ALIASES: dict[str, tuple[str, ...]] = {
         "Москва": (
             "москва",
@@ -51,6 +70,7 @@ class CatalogService:
             "крылатск",
             "садовое кольцо",
             "битца",
+            "зеленоград",
         ),
         "Санкт-Петербург": (
             "санкт-петербург",
@@ -79,6 +99,17 @@ class CatalogService:
             "одинцово",
             "можайск",
             "серпухов",
+            "чулково",
+            "володарского",
+            "руза",
+            "раменское",
+            "габо",
+            "пирогово",
+            "ступино",
+            "спас-каменка",
+            "люберцы",
+            "реутов",
+            "жуковский",
         ),
         "Ленинградская область": (
             "ленинградская область",
@@ -100,6 +131,8 @@ class CatalogService:
             "приозерск",
             "лемболово",
             "сосново",
+            "красноозерное",
+            "красноозёрное",
         ),
         "Костромская область": (
             "костромская область",
@@ -115,6 +148,7 @@ class CatalogService:
             "тутаев",
             "некрасовск",
             "некрасовское",
+            "рыбинск",
         ),
         "Самарская область": (
             "самарская область",
@@ -124,6 +158,8 @@ class CatalogService:
         "Республика Татарстан": (
             "татарстан",
             "казань",
+            "набережные челны",
+            "нижнекамск",
         ),
         "Краснодарский край": (
             "краснодарский край",
@@ -133,23 +169,40 @@ class CatalogService:
             "эсто-садок",
             "курорт газпром",
             "роза хутор",
+            "армавир",
         ),
         "Нижегородская область": (
             "нижегородская область",
             "нижний новгород",
         ),
+        "Ханты-Мансийский автономный округ — Югра": (
+            "ханты-мансийский автономный округ",
+            "югра",
+            "ханты-мансийск",
+        ),
+        "Ямало-Ненецкий автономный округ": (
+            "ямало-ненецкий автономный округ",
+            "полярный урал",
+        ),
         "Камчатский край": (
             "камчат",
             "петропавловск-камчатский",
+            "елизово",
         ),
         "Новгородская область": (
             "новгородская область",
+            "великий новгород",
             "боровичи",
             "мстинские пороги",
         ),
         "Псковская область": (
             "псковская область",
             "псков",
+        ),
+        "Республика Беларусь": (
+            "минск",
+            "беларусь",
+            "белоруссия",
         ),
         "Республика Карелия": (
             "карелия",
@@ -159,21 +212,64 @@ class CatalogService:
             "новосибирская область",
             "новосибирск",
         ),
+        "Липецкая область": (
+            "липецкая область",
+            "липецк",
+            "грязинский",
+            "грязи",
+            "каменка",
+            "кудыкина гора",
+        ),
         "Тверская область": (
             "тверская область",
             "тверь",
+            "завидово",
+            "калязин",
         ),
         "Свердловская область": (
             "свердловская область",
             "екатеринбург",
+            "нижний тагил",
+            "среднеуральск",
+            "ревда",
+            "каменск-уральский",
+            "каменский",
         ),
         "Тюменская область": (
             "тюменская область",
             "тюмень",
+            "тобольск",
         ),
         "Республика Башкортостан": (
             "башкортостан",
             "уфа",
+            "кумертау",
+            "абзелиловский район",
+            "ильчигулово",
+            "отнурок",
+            "стерлитамак",
+            "сибай",
+        ),
+        "Владимирская область": (
+            "владимирская область",
+            "владимир",
+            "александров",
+            "красное эхо",
+            "доброград",
+        ),
+        "Мурманская область": (
+            "мурманская область",
+            "кировск",
+        ),
+        "Вологодская область": (
+            "вологодская область",
+            "вологда",
+            "череповец",
+            "кириллов",
+        ),
+        "Республика Марий Эл": (
+            "марий эл",
+            "волжск",
         ),
         "Калининградская область": (
             "калининградская область",
@@ -186,6 +282,7 @@ class CatalogService:
         "Пермский край": (
             "пермский край",
             "пермь",
+            "полазна",
         ),
         "Волгоградская область": (
             "волгоградская область",
@@ -194,6 +291,13 @@ class CatalogService:
         "Тульская область": (
             "тульская область",
             "тула",
+            "зарайск",
+        ),
+        "Саратовская область": (
+            "саратовская область",
+            "саратов",
+            "хвалынск",
+            "новые бурасы",
         ),
         "Омская область": (
             "омская область",
@@ -203,13 +307,176 @@ class CatalogService:
             "челябинская область",
             "челябинск",
             "миасс",
+            "златоуст",
+            "кисегач",
+            "чебаркуль",
+            "зеленая поляна",
+            "слюдорудник",
         ),
         "Ставропольский край": (
             "ставропольский край",
             "кисловодск",
+            "железноводск",
+            "лермонтов",
+            "георгиевск",
+            "пятигорск",
+            "ставрополь",
+            "светлоград",
+        ),
+        "Кировская область": (
+            "кировская область",
+            "киров",
+        ),
+        "Пензенская область": (
+            "пензенская область",
+            "пенза",
+            "наровчат",
+        ),
+        "Республика Крым": (
+            "республика крым",
+            "крым",
+            "симферополь",
+        ),
+        "Севастополь": (
+            "севастополь",
+            "балаклава",
+        ),
+        "Приморский край": (
+            "приморский край",
+            "владивосток",
+        ),
+        "Красноярский край": (
+            "красноярский край",
+            "красноярск",
+        ),
+        "Республика Саха (Якутия)": (
+            "якутск",
+            "саха",
+            "якутия",
+            "бердигестях",
+        ),
+        "Республика Дагестан": (
+            "дагестан",
+            "гуниб",
+        ),
+        "Кабардино-Балкарская Республика": (
+            "кабардино-балкарская республика",
+            "кбр",
+            "терскол",
+            "приэльбрусье",
+        ),
+        "Карачаево-Черкесская Республика": (
+            "карачаево-черкесская республика",
+            "кчр",
+            "архыз",
+        ),
+        "Республика Адыгея": (
+            "адыгея",
+            "лаго-наки",
+        ),
+        "Республика Алтай": (
+            "республика алтай",
+            "алтай",
+            "тюнгур",
+        ),
+        "Калужская область": (
+            "калужская область",
+            "никола-ленивец",
+        ),
+        "Иркутская область": (
+            "иркутская область",
+            "сахюрта",
+        ),
+        "Ульяновская область": (
+            "ульяновская область",
+            "ульяновск",
+        ),
+        "Ивановская область": (
+            "ивановская область",
+            "иваново",
+            "фурманов",
+            "плес",
+            "кинешма",
+        ),
+        "Чувашская Республика": (
+            "чувашская республика",
+            "чебоксары",
+        ),
+        "Кемеровская область": (
+            "кемеровская область",
+            "кемерово",
+        ),
+        "Белгородская область": (
+            "белгородская область",
+            "белгород",
+        ),
+        "Хабаровский край": (
+            "хабаровский край",
+            "хабаровск",
+        ),
+        "Удмуртская Республика": (
+            "удмуртия",
+            "ижевск",
+        ),
+        "Орловская область": (
+            "орловская область",
+            "орел",
+            "орёл",
+        ),
+        "Астраханская область": (
+            "астраханская область",
+            "астрахань",
+            "камызякский район",
+            "жан-аул",
+        ),
+        "Ростовская область": (
+            "ростовская область",
+            "ростов-на-дону",
+            "морозовск",
+        ),
+        "Оренбургская область": (
+            "оренбургская область",
+            "оренбург",
+        ),
+        "Республика Северная Осетия — Алания": (
+            "северная осетия",
+            "алания",
+            "стур-дигора",
+            "рсо-алания",
         ),
         "Анталья": (
             "анталия",
+        ),
+        "Турция": (
+            "турция",
+            "стамбул",
+            "анталия",
+        ),
+        "Армения": (
+            "армения",
+            "ереван",
+            "севан",
+        ),
+        "Казахстан": (
+            "казахстан",
+            "костанай",
+        ),
+        "Грузия": (
+            "грузия",
+            "тбилиси",
+            "кахетии",
+        ),
+        "Австрия": (
+            "австрия",
+            "вена",
+        ),
+        "Сербия": (
+            "сербия",
+            "белград",
+        ),
+        "Узбекистан": (
+            "узбекистан",
+            "самарканд",
         ),
     }
     LOCATION_GROUPS: dict[str, tuple[str, ...]] = {
@@ -570,6 +837,18 @@ class CatalogService:
             return OTimeCalendarParser(source_config)
         if source_config.parser_type == "marathoncup":
             return MarathonCupParser(source_config)
+        if source_config.parser_type == "myrace":
+            return MyRaceParser(source_config)
+        if source_config.parser_type == "ironstar":
+            return IronStarParser(source_config)
+        if source_config.parser_type == "goldenultra":
+            return GoldenUltraParser(source_config)
+        if source_config.parser_type == "arf_calendar":
+            return ArfCalendarParser(source_config)
+        if source_config.parser_type == "velogearance":
+            return VelogearanceParser(source_config)
+        if source_config.parser_type == "xcnews":
+            return XCNewsParser(source_config)
         if source_config.parser_type == "galtropa":
             return GaltropaParser(source_config)
         if source_config.parser_type == "nezhesteam":
@@ -620,14 +899,25 @@ class CatalogService:
         return configs
 
     def _deduplicate(self, events: list[Event]) -> list[Event]:
-        seen: set[str] = set()
+        unique_by_url: dict[str, Event] = {}
+        fallback_seen: set[str] = set()
         result: list[Event] = []
         for event in events:
-            key = f"{event.title}|{event.starts_at}|{event.source_url}"
-            if key in seen:
+            canonical_url = self._canonical_source_url(str(event.source_url))
+            if canonical_url:
+                existing = unique_by_url.get(canonical_url)
+                if existing is None or self._event_completeness_score(event) > self._event_completeness_score(existing):
+                    unique_by_url[canonical_url] = event
                 continue
-            seen.add(key)
+
+            key = f"{event.title}|{event.starts_at}|{event.source_url}"
+            if key in fallback_seen:
+                continue
+            fallback_seen.add(key)
             result.append(event)
+
+        result.extend(unique_by_url.values())
+        result = self._deduplicate_by_signature(result)
         return sorted(
             result,
             key=lambda item: (
@@ -635,6 +925,96 @@ class CatalogService:
                 item.starts_at or "",
                 item.title.lower(),
             ),
+        )
+
+    def _deduplicate_by_signature(self, events: list[Event]) -> list[Event]:
+        deduped: dict[tuple[str, str, str], Event] = {}
+        passthrough: list[Event] = []
+
+        for event in events:
+            signature = self._semantic_dedupe_key(event)
+            if not signature:
+                passthrough.append(event)
+                continue
+
+            existing = deduped.get(signature)
+            if existing is None or self._should_replace_duplicate(existing, event):
+                deduped[signature] = event
+
+        return [*passthrough, *deduped.values()]
+
+    def _semantic_dedupe_key(self, event: Event) -> tuple[str, str, str] | None:
+        normalized_title = self._normalize_title_for_dedupe(event.title)
+        normalized_date = (event.starts_at or self._parse_date_text(event.date_text) or "")[:10]
+        normalized_location = self._normalize_location_name(event.region) or self._normalize_location_name(event.city)
+        if not normalized_title or not normalized_date or not normalized_location:
+            return None
+        return (normalized_title, normalized_date, normalized_location.casefold())
+
+    def _normalize_title_for_dedupe(self, title: str | None) -> str:
+        if not title:
+            return ""
+        normalized = title.casefold().replace("ё", "е")
+        normalized = re.sub(r"[\"'`«»„“”()]+", " ", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized
+
+    def _should_replace_duplicate(self, existing: Event, candidate: Event) -> bool:
+        existing_score = self._event_completeness_score(existing)
+        candidate_score = self._event_completeness_score(candidate)
+        if candidate_score != existing_score:
+            return candidate_score > existing_score
+        return self._source_priority(candidate.source_name) > self._source_priority(existing.source_name)
+
+    def _source_priority(self, source_name: str | None) -> int:
+        if not source_name:
+            return 0
+        return self.SOURCE_PRIORITY.get(source_name, 1)
+
+    def _canonical_source_url(self, source_url: str | None) -> str:
+        if not source_url:
+            return ""
+
+        normalized = source_url.strip()
+        if not normalized:
+            return ""
+
+        normalized = re.sub(r"#.*$", "", normalized)
+        normalized = re.sub(r"\?.*$", "", normalized)
+        normalized = normalized.rstrip("/")
+        parsed = urlparse(normalized)
+        host = parsed.netloc.lower()
+        path = parsed.path.rstrip("/")
+
+        if host == "iron-star.com" and path.startswith("/en/"):
+            path = path[3:]
+
+        normalized = urlunparse(
+            (
+                parsed.scheme.lower(),
+                host,
+                path.lower(),
+                "",
+                "",
+                "",
+            )
+        )
+        return normalized
+
+    def _event_completeness_score(self, event: Event) -> int:
+        return sum(
+            1
+            for value in (
+                event.starts_at,
+                event.date_text,
+                event.city,
+                event.region,
+                event.venue,
+                event.category,
+                event.description,
+                event.image_url,
+            )
+            if value
         )
 
     def _normalize_events(self, events: list[Event]) -> list[Event]:
@@ -736,6 +1116,7 @@ class CatalogService:
         normalized_region = self._normalize_location_name(region)
         if not normalized_city:
             return None
+        normalized_city = re.sub(r"^\d+\s*,\s*", "", normalized_city).strip(" ,")
         if not normalized_region:
             return normalized_city
 
@@ -782,6 +1163,16 @@ class CatalogService:
             "обл.": "область",
             "респ.": "республика",
             "г. ": "",
+            "gatchina": "гатчина",
+            "saint petersburg": "санкт-петербург",
+            "st. petersburg": "санкт-петербург",
+            "moscow": "москва",
+            "perm": "пермь",
+            "sochi": "сочи",
+            "minsk": "минск",
+            "vladivostok": "владивосток",
+            "ивановская": "ивановская область",
+            "приморский": "приморский край",
         }
         for source, target in replacements.items():
             normalized = normalized.replace(source, target)
@@ -797,8 +1188,12 @@ class CatalogService:
     def _matches_selected_location(self, event: Event, selected_location: str) -> bool:
         normalized_selected = self._normalize_location_name(selected_location) or selected_location
         haystack = self._build_location_haystack(event)
+        normalized_event_region = self._normalize_location_name(event.region)
 
         if self._matches_location_group(event, normalized_selected):
+            return True
+
+        if normalized_event_region and normalized_event_region == normalized_selected:
             return True
 
         region_aliases = self.REGION_ALIASES.get(normalized_selected)
@@ -890,6 +1285,8 @@ class CatalogService:
             return "Лыжи"
         if any(token in normalized for token in ["плав", "swim"]):
             return "Плавание"
+        if any(token in normalized for token in ["водный спорт", "sup", "сап", "греб", "каяк", "байдар"]):
+            return "Плавание"
         if any(token in normalized for token in ["триатлон", "дуатлон", "swimrun", "акватлон"]):
             return "Триатлон"
         if any(
@@ -903,12 +1300,18 @@ class CatalogService:
             return "Единоборства"
         if any(token in normalized for token in ["легкая атлетика", "атлетик"]):
             return "Легкая атлетика"
+        if any(token in normalized for token in ["гонки с препятствиями", "ocr", "ниндзя", "obstacle"]):
+            return "Другие"
+        if any(token in normalized for token in ["фестиваль", "лагерь", "тур", "перезагрузка"]):
+            return "Другие"
+        if "скайран" in normalized:
+            return "Бег"
         if any(
             token in normalized
             for token in ["детский спорт", "самокат", "беговел", "подвижные игры"]
         ):
             return "Детские старты"
-        if "другой вид" in normalized:
+        if normalized in {"другое", "другие"} or "другой вид" in normalized:
             return "Другие"
 
         return category.strip()
@@ -917,7 +1320,7 @@ class CatalogService:
         filtered = events
 
         if filters.query:
-            query = filters.query.lower()
+            query = filters.query.casefold().strip()
             filtered = [
                 event
                 for event in filtered
@@ -932,7 +1335,7 @@ class CatalogService:
                             event.category,
                         ],
                     )
-                ).lower()
+                ).casefold()
             ]
 
         if filters.cities:

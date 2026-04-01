@@ -306,12 +306,30 @@ class RegPlaceParser(CssDirectoryParser):
             (r"\bКисловодск\b", "Кисловодск"),
             (r"\bМосква\b", "Москва"),
             (r"\bСанкт[-\s]?Петербург\b|\bСПБ\b", "Санкт-Петербург"),
+            (r"\bЗеленоград\b", "Зеленоград"),
             (r"\bКрасногорск\b", "Красногорск"),
             (r"\bКотельники\b", "Котельники"),
             (r"\bСочи\b", "Сочи"),
             (r"\bКазань\b", "Казань"),
             (r"\bТрубино\b", "Трубино"),
             (r"\bБелая Дача\b", "Котельники"),
+            (r"\bРаменск", "Раменское"),
+            (r"\bРуза\b", "Руза"),
+            (r"\bАлександров\b", "Александров"),
+            (r"\bОр[её]л\b", "Орёл"),
+            (r"\bИваново\b", "Иваново"),
+            (r"\bКалязин\b", "Калязин"),
+            (r"\bСтупино\b", "Ступино"),
+            (r"\bПл[её]с\b", "Плес"),
+            (r"\bКинешма\b", "Кинешма"),
+            (r"\bЛюберц", "Люберцы"),
+            (r"\bСпас-Каменк", "Спас-Каменка"),
+            (r"\bДоброград\b", "Доброград"),
+            (r"\bМорозовск\b", "Морозовск"),
+            (r"\bГАБО\b", "ГАБО"),
+            (r"\bПирогово\b", "Пирогово"),
+            (r"\bБердигестях\b", "Бердигестях"),
+            (r"\bАбзелиловск", "Абзелиловский район"),
         ]
         for pattern, city in city_patterns:
             if re.search(pattern, combined, flags=re.IGNORECASE):
@@ -1164,6 +1182,21 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
             "Petrovsk": "Петровск",
             "Kislovodsk": "Кисловодск",
             "Antalya": "Анталия",
+            "Khanty-Mansiysk": "Ханты-Мансийск",
+            "Stavropol": "Ставрополь",
+            "Sibay": "Сибай",
+            "Cheboksary": "Чебоксары",
+            "Tobolsk": "Тобольск",
+            "Lipetsk": "Липецк",
+            "Vologda": "Вологда",
+            "Cherepovets": "Череповец",
+            "Khabarovsk": "Хабаровск",
+            "Yamal": "Ямало-Ненецкий автономный округ",
+            "Belgrade": "Белград",
+            "Yerevan": "Ереван",
+            "Vienna": "Вена",
+            "Tbilisi": "Тбилиси",
+            "Samarkand": "Самарканд",
         }
         return aliases.get(normalized, normalized)
 
@@ -2073,3 +2106,678 @@ class NezhesteamParser(CssDirectoryParser):
             )
 
         return events
+
+
+class MyRaceParser(CssDirectoryParser):
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+
+        for index, card in enumerate(soup.select("a.events-list__item.row")):
+            href = card.get("href")
+            if not isinstance(href, str):
+                continue
+
+            title_element = card.select_one("h2")
+            if not title_element:
+                continue
+
+            title_copy = BeautifulSoup(str(title_element), "html.parser")
+            for nested in title_copy.select(".registration-status"):
+                nested.decompose()
+            title = title_copy.get_text(" ", strip=True)
+            if not title:
+                continue
+
+            date_text = self._extract_optional_text(card, ".date")
+            city = self._extract_optional_text(card, ".flag")
+            category = self._extract_optional_text(card, ".type")
+            participants = self._extract_optional_text(card, ".counter")
+            registration_status = self._extract_optional_text(card, ".registration-status")
+
+            description_parts = [
+                f"Участников: {participants}" if participants else None,
+                registration_status,
+            ]
+            description = " • ".join(part for part in description_parts if part) or None
+
+            normalized_city = None if city in {None, "-", "—"} else city
+            full_link = urljoin(page_url, href)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"myrace-{index}-{stable_hash}",
+                    title=title,
+                    description=description,
+                    city=normalized_city,
+                    region=None,
+                    federal_district=None,
+                    venue=None,
+                    category=category,
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=None,
+                )
+            )
+
+        return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        tasks = [
+            self._enrich_myrace_event(event, client)
+            for event in events
+            if not event.city or not event.venue
+        ]
+        if not tasks:
+            return events
+
+        enriched_events = await asyncio.gather(*tasks, return_exceptions=True)
+        updates = {
+            enriched.id: enriched
+            for enriched in enriched_events
+            if isinstance(enriched, Event)
+        }
+        return [updates.get(event.id, event) for event in events]
+
+    async def _enrich_myrace_event(
+        self, event: Event, client: httpx.AsyncClient
+    ) -> Event:
+        try:
+            response = await client.get(str(event.source_url))
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        hero_city, hero_venue = self._extract_myrace_header_location(soup)
+        location_text = self._extract_myrace_location_text(soup)
+        venue, city = self._split_myrace_location(location_text)
+
+        return event.model_copy(
+            update={
+                "city": hero_city or city or event.city,
+                "venue": hero_venue or venue or event.venue,
+            }
+        )
+
+    def _extract_myrace_header_location(
+        self, soup: BeautifulSoup
+    ) -> tuple[str | None, str | None]:
+        header = soup.select_one(".mt-5.text-large")
+        if not header:
+            return None, None
+
+        city = self._extract_text(header, ".text-strong")
+        venue = self._extract_text(header, ".text-muted.text-regular")
+        normalized_city = None if city in {None, "-", "—"} else city
+        normalized_venue = None if venue in {None, "-", "—"} else venue
+        return normalized_city, normalized_venue
+
+    def _extract_myrace_location_text(self, soup: BeautifulSoup) -> str | None:
+        for paragraph in soup.select(".event-about p"):
+            text = paragraph.get_text(" ", strip=True)
+            match = re.search(
+                r"Место проведения:\s*(.+?)(?:Дата проведения:|Карта:|$)",
+                text,
+                re.IGNORECASE,
+            )
+            if match:
+                return match.group(1).strip(" ,")
+
+        for paragraph in soup.select(".event-about p"):
+            text = paragraph.get_text(" ", strip=True)
+            match = re.search(r"Локация:\s*(.+?)(?:Карта:|$)", text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip(" ,")
+
+        header_location = soup.select_one(".text-muted.text-regular")
+        if header_location:
+            return header_location.get_text(" ", strip=True)
+        return None
+
+    def _split_myrace_location(self, raw_location: str | None) -> tuple[str | None, str | None]:
+        if not raw_location:
+            return None, None
+
+        cleaned = re.sub(r"\s+", " ", raw_location).strip(" ,")
+        parts = [part.strip(" ,") for part in cleaned.split(",") if part.strip(" ,")]
+        if len(parts) >= 2:
+            return parts[0], parts[-1]
+        return None, cleaned
+
+
+class IronStarParser(CssDirectoryParser):
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+
+        for index, card in enumerate(soup.select("a.event-item")):
+            href = card.get("href")
+            if not isinstance(href, str):
+                continue
+
+            title = self._extract_ironstar_title(card)
+            if not title:
+                continue
+
+            date_text = self._extract_optional_text(card, ".event-head-info .date")
+            city = self._extract_optional_text(card, ".event-head-info .place")
+            image_url = self._extract_optional_attr(card, ".event-image img", "src")
+            category = self._infer_ironstar_category(title, href)
+            full_link = urljoin(page_url, href)
+            full_image = urljoin(page_url, image_url) if image_url else None
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+            normalized_city = None if city in {None, "-", "—"} else city
+
+            events.append(
+                Event(
+                    id=f"ironstar-{index}-{stable_hash}",
+                    title=title,
+                    description=None,
+                    city=normalized_city,
+                    region=None,
+                    federal_district=None,
+                    venue=None,
+                    category=category,
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=full_image,
+                )
+            )
+
+        return events
+
+    def _extract_ironstar_title(self, card: Any) -> str | None:
+        raw_title = card.get("title")
+        if isinstance(raw_title, str):
+            normalized = raw_title.strip()
+            normalized = re.sub(
+                r"\s*-\s*\d{1,2}\.\d{1,2}\.\d{4}(?:\s*-\s*.+)?$",
+                "",
+                normalized,
+            )
+            if normalized:
+                return normalized
+        return self._extract_optional_text(card, ".title")
+
+    def _infer_ironstar_category(self, title: str, href: str) -> str:
+        combined = f"{title} {href}".lower()
+        if "swimstar" in combined or "swim" in combined:
+            return "Плавание"
+        if "starkids" in combined or "kids" in combined:
+            return "Детские старты"
+        return "Триатлон"
+
+
+class GoldenUltraParser(CssDirectoryParser):
+    EXCLUDED_PATHS = {
+        "/legend",
+        "/legend/",
+    }
+
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        if not self.config.listing_urls:
+            return []
+
+        try:
+            response = await client.get(self.config.listing_urls[0])
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return []
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        page_urls = self._extract_goldenultra_page_urls(soup, self.config.listing_urls[0])
+        events: list[Event] = []
+
+        for index, page_url in enumerate(page_urls):
+            event = await self._fetch_goldenultra_event(page_url, index, client)
+            if event:
+                events.append(event)
+
+        return events
+
+    def _extract_goldenultra_page_urls(self, soup: BeautifulSoup, page_url: str) -> list[str]:
+        urls: list[str] = []
+        seen: set[str] = set()
+
+        for link in soup.select('a[href*="goldenultra.ru"], a[href*="ultras.goldenultra.ru"]'):
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
+
+            full_url = urljoin(page_url, href)
+            parsed = httpx.URL(full_url)
+            host = parsed.host or ""
+            path = parsed.path or "/"
+
+            if host not in {"goldenultra.ru", "www.goldenultra.ru", "ultras.goldenultra.ru"}:
+                continue
+            if "/en" in path or "lang=en" in href:
+                continue
+            if path in self.EXCLUDED_PATHS:
+                continue
+            if any(
+                blocked in path
+                for blocked in ("/store", "/favs", "/files", "/images", "/index", "/css", "/js")
+            ):
+                continue
+            if path in {"/", ""}:
+                continue
+
+            normalized = f"{parsed.scheme}://{host}{path}".rstrip("/")
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            urls.append(normalized)
+
+        return urls
+
+    async def _fetch_goldenultra_event(
+        self, page_url: str, index: int, client: httpx.AsyncClient
+    ) -> Event | None:
+        try:
+            response = await client.get(page_url)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return None
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        title = self._extract_goldenultra_title(soup, page_url)
+        if not title:
+            return None
+
+        page_text = soup.get_text(" ", strip=True)
+        date_text = self._extract_goldenultra_date(page_text)
+        city = self._extract_goldenultra_city(page_text, page_url)
+        image_url = self._extract_goldenultra_image(soup, page_url)
+        category = self._infer_goldenultra_category(title, page_url)
+        stable_hash = hashlib.sha1(page_url.encode("utf-8")).hexdigest()[:12]
+
+        return Event(
+            id=f"goldenultra-{index}-{stable_hash}",
+            title=title,
+            description=None,
+            city=city,
+            region=None,
+            federal_district=None,
+            venue=None,
+            category=category,
+            date_text=date_text,
+            starts_at=self._normalize_datetime(date_text),
+            source_name=self.config.name,
+            source_url=page_url,
+            image_url=image_url,
+        )
+
+    def _extract_goldenultra_title(self, soup: BeautifulSoup, page_url: str) -> str | None:
+        heading = soup.select_one("title")
+        if heading:
+            text = heading.get_text(" ", strip=True)
+            text = re.sub(r"\s*\|\s*Running Heroes Russia.*$", "", text, flags=re.IGNORECASE)
+            text = re.sub(r"\s*\|\s*MyRace.*$", "", text, flags=re.IGNORECASE)
+            if text:
+                return text
+
+        header = soup.select_one("h1, h2")
+        if header:
+            return header.get_text(" ", strip=True)
+        return page_url.rstrip("/").split("/")[-1]
+
+    def _extract_goldenultra_date(self, text: str) -> str | None:
+        match = re.search(
+            r"(\d{1,2}(?:\s*-\s*\d{1,2})?(?:\s*-\s*\d{1,2})?\s+"
+            r"(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)"
+            r"\s+20\d{2})",
+            text.lower(),
+        )
+        if match:
+            return match.group(1)
+
+        numeric_match = re.search(r"(\d{1,2}\.\d{1,2}\.\d{4})", text)
+        return numeric_match.group(1) if numeric_match else None
+
+    def _extract_goldenultra_city(self, text: str, page_url: str) -> str | None:
+        slug = page_url.rstrip("/").split("/")[-1].lower()
+        known_locations = {
+            "grut": "Суздаль",
+            "madfox": "Переславль-Залесский",
+            "crazyowl": "Тутаев",
+            "wbu": "Геленджик",
+            "kuge": "Териберка",
+            "krcs": "Чара",
+            "cameltrophy": "Калмыкия",
+            "vmr": "Гимолы",
+            "plogging": "Москва",
+        }
+        if slug in known_locations:
+            return known_locations[slug]
+
+        for candidate in (
+            "суздаль",
+            "переславль-залесский",
+            "геленджик",
+            "териберка",
+            "чара",
+            "калмыкия",
+            "гимолы",
+            "тутаев",
+            "москва",
+        ):
+            if candidate in text.lower():
+                return candidate.title() if candidate != "переславль-залесский" else "Переславль-Залесский"
+        return None
+
+    def _extract_goldenultra_image(self, soup: BeautifulSoup, page_url: str) -> str | None:
+        og_image = soup.select_one('meta[property="og:image"]')
+        if og_image and og_image.get("content"):
+            return urljoin(page_url, str(og_image.get("content")))
+
+        hero_image = soup.select_one('div[style*="background-image"]')
+        if hero_image:
+            style = hero_image.get("style")
+            if isinstance(style, str):
+                match = re.search(r'url\(["\']?(.+?)["\']?\)', style)
+                if match:
+                    return urljoin(page_url, match.group(1))
+        return None
+
+    def _infer_goldenultra_category(self, title: str, page_url: str) -> str:
+        combined = f"{title} {page_url}".lower()
+        if "plogging" in combined:
+            return "Ходьба"
+        return "Бег"
+
+
+class ArfCalendarParser(CssDirectoryParser):
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        if not self.config.listing_urls:
+            return []
+
+        try:
+            response = await client.get(self.config.listing_urls[0])
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return []
+
+        html = response.content.decode("cp1251", errors="ignore")
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+
+        for index, card in enumerate(soup.select("#short-links-section-events-future .nav-item")):
+            link = card.select_one("a.short-news-link")
+            if not link:
+                continue
+
+            href = link.get("href")
+            title = link.get_text(" ", strip=True)
+            if not isinstance(href, str) or not title:
+                continue
+
+            date_text = self._extract_optional_text(card, "[id^='event-date-']")
+            meta_text = self._extract_optional_text(card, ".subhead.event-add-strings")
+            city, venue = self._extract_arf_location(meta_text)
+            category = self._infer_arf_category(title, meta_text)
+            full_link = urljoin(self.config.base_url, href)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"arf-{index}-{stable_hash}",
+                    title=title,
+                    description=None,
+                    city=city,
+                    region=None,
+                    federal_district=None,
+                    venue=venue,
+                    category=category,
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=None,
+                )
+            )
+
+        return events
+
+    def _extract_arf_location(self, meta_text: str | None) -> tuple[str | None, str | None]:
+        if not meta_text:
+            return None, None
+
+        lines = [line.strip(" ,") for line in meta_text.splitlines() if line.strip()]
+        cleaned_lines = [line for line in lines if "arf.by" not in line.lower()]
+        venue = cleaned_lines[-1] if cleaned_lines else None
+
+        city = None
+        search_pool = " ".join(cleaned_lines).lower()
+        for candidate in ("минск", "логойск", "полоцк", "гродно", "гомель", "витебск", "могилев", "брест"):
+            if candidate in search_pool:
+                city = candidate.title()
+                break
+
+        return city or venue, venue
+
+    def _infer_arf_category(self, title: str, meta_text: str | None) -> str:
+        combined = f"{title} {meta_text or ''}".lower()
+        if any(token in combined for token in ("вел", "bike", "mtb", "velo")):
+            return "Велоспорт"
+        if any(token in combined for token in ("бег", "trail", "кросс", "run")):
+            return "Бег"
+        return "Другие"
+
+
+class VelogearanceParser(CssDirectoryParser):
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+
+        for index, card in enumerate(soup.select("article.post")):
+            title_element = card.select_one(".entry-title a")
+            if not title_element:
+                continue
+
+            href = title_element.get("href")
+            title = title_element.get_text(" ", strip=True)
+            if not isinstance(href, str) or not title:
+                continue
+
+            date_text = self._extract_velogearance_date(title)
+            city = self._extract_velogearance_city(title)
+            image_url = self._extract_optional_attr(card, ".grid-box-img img", "src")
+            description = self._extract_optional_text(card, ".entry-content")
+            full_link = urljoin(page_url, href)
+            full_image = urljoin(page_url, image_url) if image_url else None
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"velogearance-{index}-{stable_hash}",
+                    title=title,
+                    description=description,
+                    city=city,
+                    region=None,
+                    federal_district=None,
+                    venue=None,
+                    category="Велоспорт",
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=full_image,
+                )
+            )
+
+        return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        tasks = [
+            self._enrich_velogearance_event(event, client)
+            for event in events
+            if not event.city or not event.date_text or not event.starts_at or not event.venue
+        ]
+        if not tasks:
+            return events
+
+        enriched_events = await asyncio.gather(*tasks, return_exceptions=True)
+        updates = {
+            enriched.id: enriched
+            for enriched in enriched_events
+            if isinstance(enriched, Event)
+        }
+        return [updates.get(event.id, event) for event in events]
+
+    async def _enrich_velogearance_event(
+        self, event: Event, client: httpx.AsyncClient
+    ) -> Event:
+        try:
+            response = await client.get(str(event.source_url))
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        page_title = self._extract_optional_text(soup, "title") or event.title
+        content_text = self._extract_optional_text(soup, ".entry-content") or ""
+        combined = f"{page_title} {event.title} {content_text}"
+
+        date_text = event.date_text or self._extract_velogearance_date(combined)
+        city, venue = self._extract_velogearance_location(combined)
+
+        return event.model_copy(
+            update={
+                "date_text": date_text or event.date_text,
+                "starts_at": self._normalize_datetime(date_text) or event.starts_at,
+                "city": city or event.city,
+                "venue": venue or event.venue,
+            }
+        )
+
+    def _extract_velogearance_date(self, title: str) -> str | None:
+        compact = re.search(r"(\d{1,2})\|(\d{1,2})\|(\d{4})", title)
+        if compact:
+            day, month, year = compact.groups()
+            return f"{day.zfill(2)}.{month.zfill(2)}.{year}"
+
+        slash = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", title)
+        if slash:
+            day, month, year = slash.groups()
+            return f"{day.zfill(2)}.{month.zfill(2)}.{year}"
+
+        match = re.search(
+            r"(\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+\d{4})",
+            title.lower(),
+        )
+        if match:
+            return match.group(1)
+        return None
+
+    def _extract_velogearance_city(self, title: str) -> str | None:
+        lowered = title.lower()
+        if "чулково" in lowered:
+            return "Чулково"
+        if "битц" in lowered or "битца" in lowered:
+            return "Москва"
+        if "московская область" in lowered:
+            return "Московская область"
+        return None
+
+    def _extract_velogearance_location(self, text: str) -> tuple[str | None, str | None]:
+        lowered = text.lower()
+        if "чулково" in lowered:
+            return "Чулково", "Чулково"
+        if "битц" in lowered or "битца" in lowered:
+            return "Москва", "Битца"
+        if "поселок володарского" in lowered:
+            return "Московская область", "поселок Володарского"
+        if "московская область" in lowered:
+            return "Московская область", "Московская область"
+        return self._extract_velogearance_city(text), None
+
+
+class XCNewsParser(CssDirectoryParser):
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        if not self.config.listing_urls:
+            return []
+
+        try:
+            response = await client.get(self.config.listing_urls[0])
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return []
+
+        html = response.content.decode("cp1251", errors="ignore")
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+
+        for index, row in enumerate(soup.select("table tr")):
+            cells = row.select("td")
+            if len(cells) < 4:
+                continue
+
+            link = cells[1].select_one("a")
+            if not link:
+                continue
+
+            href = link.get("href")
+            title = link.get_text(" ", strip=True)
+            date_text = cells[0].get_text(" ", strip=True)
+            location_text = cells[2].get_text(" ", strip=True)
+            race_type = cells[3].get_text(" ", strip=True)
+            if not isinstance(href, str) or not title or not re.match(r"\d{2}\.\d{2}\.\d{4}", date_text):
+                continue
+
+            city, venue = self._extract_xcnews_location(location_text)
+            category = self._infer_xcnews_category(title, race_type)
+            full_link = urljoin(self.config.base_url, href)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"xcnews-{index}-{stable_hash}",
+                    title=title,
+                    description=None,
+                    city=city,
+                    region=None,
+                    federal_district=None,
+                    venue=venue,
+                    category=category,
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=None,
+                )
+            )
+
+        return events
+
+    def _extract_xcnews_location(self, raw_location: str | None) -> tuple[str | None, str | None]:
+        if not raw_location:
+            return None, None
+
+        cleaned = re.sub(r"\s+", " ", raw_location).strip(" ,")
+        parts = [part.strip(" ,") for part in cleaned.split(",") if part.strip(" ,")]
+        if len(parts) >= 2:
+            return parts[0], cleaned
+        return cleaned, cleaned
+
+    def _infer_xcnews_category(self, title: str, race_type: str | None) -> str:
+        combined = f"{title} {race_type or ''}".lower()
+        if any(token in combined for token in ("xco", "xcm", "xcc", "mtb", "вело", "кросс-кантри")):
+            return "Велоспорт"
+        return "Другие"
