@@ -1888,6 +1888,8 @@ class GranFondoParser(CssDirectoryParser):
             title = title_block.get_text(" ", strip=True)
             if date_text:
                 title = title.replace(date_text, "").strip()
+            if title and "granfondo" not in title.casefold():
+                title = f"Granfondo {title}"
 
             link_node = item.select_one("a.thumbnail[href]")
             image_url = self._extract_optional_attr(item, "img", "src")
@@ -1920,6 +1922,83 @@ class GranFondoParser(CssDirectoryParser):
             )
 
         return events
+
+
+class SwimcupParser(CssDirectoryParser):
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+        current_month_year: str | None = None
+
+        for node in soup.select("h3.center, ul.results > li.results__list"):
+            if node.name == "h3":
+                current_month_year = node.get_text(" ", strip=True)
+                continue
+
+            title = self._extract_optional_text(node, ".results__col--name")
+            raw_date = self._extract_optional_text(node, ".results__col--cal")
+            city = self._extract_optional_text(node, ".results__col--city")
+            distances = self._extract_optional_text(node, ".results__col--clock")
+            stage_type = self._extract_optional_text(node, ".results__col--type")
+            detail_href = self._extract_optional_attr(node, "a.file--blue[href]", "href")
+            register_href = self._extract_optional_attr(
+                node,
+                "a.file[href*='reg.place/events/']",
+                "href",
+            )
+
+            if not title or not raw_date:
+                continue
+
+            date_text = self._normalize_swimcup_date(raw_date, current_month_year)
+            source_href = detail_href or register_href
+            if not source_href:
+                continue
+
+            full_link = urljoin(page_url, source_href)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+            description_parts = [part for part in (distances, stage_type) if part]
+
+            events.append(
+                Event(
+                    id=f"swimcup-{len(events)}-{stable_hash}",
+                    title=title,
+                    description=" • ".join(description_parts) if description_parts else None,
+                    city=self._normalize_swimcup_city(city),
+                    region=None,
+                    federal_district=None,
+                    venue=city,
+                    category="Плавание",
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=None,
+                )
+            )
+
+        return events
+
+    def _normalize_swimcup_date(self, raw_date: str, month_year: str | None) -> str:
+        cleaned = re.sub(r"\s+", " ", raw_date.replace("\xa0", " ")).strip()
+        if re.search(r"\b20\d{2}\b", cleaned):
+            return cleaned
+        if month_year and re.search(r"\b20\d{2}\b", month_year):
+            year_match = re.search(r"\b(20\d{2})\b", month_year)
+            if year_match:
+                return f"{cleaned} {year_match.group(1)}"
+        return cleaned
+
+    def _normalize_swimcup_city(self, city: str | None) -> str | None:
+        if not city:
+            return None
+        cleaned = re.sub(r"\s+", " ", city.replace("\xa0", " ")).strip()
+        replacements = {
+            "Красногорск МО": "Красногорск",
+            "Руза МО": "Руза",
+            "Серпухов МО": "Серпухов",
+        }
+        return replacements.get(cleaned, cleaned)
 
 
 class CyclingRaceParser(CssDirectoryParser):

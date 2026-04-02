@@ -35,6 +35,7 @@ from app.parsers.base import (
     VelomarathonParser,
     SourceConfig,
     SportidentParser,
+    SwimcupParser,
     SourceFieldMap,
     VelogearanceParser,
     XCNewsParser,
@@ -916,6 +917,8 @@ class CatalogService:
             return ArfCalendarParser(source_config)
         if source_config.parser_type == "sportident":
             return SportidentParser(source_config)
+        if source_config.parser_type == "swimcup":
+            return SwimcupParser(source_config)
         if source_config.parser_type == "velogearance":
             return VelogearanceParser(source_config)
         if source_config.parser_type == "xcnews":

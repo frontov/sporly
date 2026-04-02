@@ -243,6 +243,20 @@
       }
     },
     {
+      "name": "Swimcup",
+      "base_url": "https://swimcup.ru",
+      "listing_urls": [
+        "https://swimcup.ru/series/?view=calendar"
+      ],
+      "enabled": true,
+      "parser_type": "swimcup",
+      "selectors": {
+        "item": "li.results__list",
+        "title": ".results__col--name",
+        "link": "a.file--blue[href]"
+      }
+    },
+    {
       "name": "Velogearance",
       "base_url": "https://velogearance.ru",
       "listing_urls": [
