@@ -536,6 +536,40 @@ class RegPlaceParser(CssDirectoryParser):
 
 
 class OrgeoParser(CssDirectoryParser):
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        if not self.config.listing_urls:
+            return []
+
+        events: list[Event] = []
+        page_queue = list(self.config.listing_urls)
+        seen_pages: set[str] = set()
+
+        while page_queue and len(seen_pages) < max(self.config.max_pages, 1):
+            page_url = page_queue.pop(0)
+            if page_url in seen_pages:
+                continue
+
+            try:
+                response = await client.get(page_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+
+            current_url = str(response.url)
+            if current_url in seen_pages:
+                continue
+
+            seen_pages.add(current_url)
+            events.extend(self.parse(response.text, current_url))
+
+            for next_url in self.extract_pagination_urls(response.text, current_url):
+                if next_url not in seen_pages and next_url not in page_queue:
+                    page_queue.append(next_url)
+
+        return await self.enrich_events(events, client)
+
     def parse(self, html: str, page_url: str) -> list[Event]:
         soup = BeautifulSoup(html, "html.parser")
         rows = soup.select("td.event_view_td.hidden-xs")

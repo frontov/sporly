@@ -56,7 +56,7 @@
       "enabled": true,
       "parser_type": "orgeo",
       "pagination_selector": ".pagination li.page:not(.active) a",
-      "max_pages": 5,
+      "max_pages": 15,
       "selectors": {
         "item": "td.event_view_td.hidden-xs",
         "title": "td.td_block > a",
