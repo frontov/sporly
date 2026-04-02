@@ -110,6 +110,8 @@ class CssDirectoryParser:
             if not isinstance(href, str):
                 continue
             full_url = urljoin(page_url, href)
+            if full_url == page_url:
+                continue
             if full_url in seen:
                 continue
             seen.add(full_url)
@@ -3541,6 +3543,28 @@ class ArfCalendarParser(CssDirectoryParser):
 
 
 class VelogearanceParser(CssDirectoryParser):
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        events: list[Event] = []
+        seen_urls: set[str] = set()
+
+        for listing_url in self.config.listing_urls:
+            try:
+                response = await client.get(listing_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+
+            for event in self.parse(response.text, str(response.url)):
+                source_url = str(event.source_url)
+                if source_url in seen_urls:
+                    continue
+                seen_urls.add(source_url)
+                events.append(event)
+
+        return events
+
     def parse(self, html: str, page_url: str) -> list[Event]:
         soup = BeautifulSoup(html, "html.parser")
         events: list[Event] = []
