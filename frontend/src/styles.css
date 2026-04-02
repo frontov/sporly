@@ -1114,7 +1114,7 @@ code {
   .filters[open] .filters__body {
     max-height: calc(100dvh - 120px);
     overflow: auto;
-    padding-bottom: 124px;
+    padding-bottom: 176px;
   }
 
   .filters__cluster {
@@ -1152,13 +1152,17 @@ code {
     font-size: 1rem;
   }
 
-  .filters__actions {
-    position: sticky;
-    bottom: -2px;
-    margin: 20px -16px -16px;
+  .filters[open] .filters__actions {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    z-index: 4;
+    margin: 0;
     padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
     gap: 12px;
     border-top: 1px solid rgba(19, 33, 28, 0.08);
+    border-radius: 0 0 26px 26px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.98) 24%);
     backdrop-filter: blur(18px);
