@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+import json
 import re
 from typing import Any
 from urllib.parse import urljoin
@@ -2601,6 +2602,199 @@ class MyRaceParser(CssDirectoryParser):
             )
 
         return events
+
+
+class RaceTimeParser(CssDirectoryParser):
+    SPORT_TYPE_MAP: dict[int, str] = {
+        20: "Бег",
+        40: "Бег",
+        130: "Другие",
+        220: "Бег",
+    }
+
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        if not self.config.listing_urls:
+            return []
+
+        events: list[Event] = []
+        direct_urls = [
+            url
+            for url in self.config.listing_urls[1:]
+            if "/RaceTime/" in url or "/scanEvent/" in url or url.count("/") > 3
+        ]
+
+        try:
+            response = await client.get(self.config.listing_urls[0])
+            response.raise_for_status()
+            events.extend(self.parse(response.text, str(response.url)))
+        except httpx.HTTPError:
+            pass
+
+        seen = {event.source_url for event in events}
+        for url in direct_urls:
+            if url in seen:
+                continue
+            try:
+                detail_response = await client.get(url)
+                detail_response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+
+            event = self._parse_racetime_detail(detail_response.text, str(detail_response.url))
+            if event is None or event.source_url in seen:
+                continue
+            seen.add(event.source_url)
+            events.append(event)
+
+        return events
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        races = self._extract_racetime_payload(html)
+        if not races:
+            return []
+
+        events: list[Event] = []
+        seen_urls: set[str] = set()
+
+        for index, race in enumerate(races.values()):
+            public_url = race.get("racePublicUrl")
+            title = (race.get("displayName") or "").strip()
+            if not isinstance(public_url, str) or not title:
+                continue
+
+            full_link = urljoin(page_url, public_url)
+            if full_link in seen_urls:
+                continue
+            seen_urls.add(full_link)
+
+            date_value = race.get("dateTime")
+            city = race.get("city")
+            secondary = (race.get("displayNameSecondary") or "").strip()
+            organization = (race.get("organizationName") or "").strip()
+            sport_type_id = race.get("sportTypeId")
+            image_url = race.get("racePhotoUrl")
+
+            description_parts = [secondary or None, organization or None]
+            description = " • ".join(part for part in description_parts if part) or None
+            category = self._racetime_category(secondary, title, sport_type_id)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"racetime-{index}-{stable_hash}",
+                    title=title,
+                    description=description,
+                    city=city.strip() if isinstance(city, str) and city.strip() else None,
+                    region=None,
+                    federal_district=None,
+                    venue=None,
+                    category=category,
+                    date_text=self._format_racetime_date(date_value),
+                    starts_at=self._normalize_datetime(date_value),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=urljoin(page_url, image_url) if isinstance(image_url, str) and image_url else None,
+                )
+            )
+
+        return events
+
+    def _parse_racetime_detail(self, html: str, page_url: str) -> Event | None:
+        title_match = re.search(r"<title>(.*?)</title>", html, re.S | re.I)
+        title = None
+        if title_match:
+            title = BeautifulSoup(title_match.group(1), "html.parser").get_text(" ", strip=True)
+        if not title:
+            return None
+
+        stage_match = re.search(r"var\\s+RACE_STAGE_INFO\\s*=\\s*(\\{.*?\\})\\s*;", html, re.S)
+        date_value = None
+        if stage_match:
+            try:
+                stage_info = json.loads(stage_match.group(1))
+                date_value = stage_info.get("startDateTime")
+            except json.JSONDecodeError:
+                date_value = None
+
+        image_match = re.search(r'<meta\\s+property=\"og:image\"\\s+content=\"([^\"]+)\"', html, re.I)
+        image_url = image_match.group(1) if image_match else None
+        stable_hash = hashlib.sha1(page_url.encode("utf-8")).hexdigest()[:12]
+
+        return Event(
+            id=f"racetime-direct-{stable_hash}",
+            title=title,
+            description=None,
+            city=None,
+            region=None,
+            federal_district=None,
+            venue=None,
+            category=self._racetime_category("", title, None),
+            date_text=self._format_racetime_date(date_value),
+            starts_at=self._normalize_datetime(date_value),
+            source_name=self.config.name,
+            source_url=page_url,
+            image_url=urljoin(page_url, image_url) if isinstance(image_url, str) and image_url else None,
+        )
+
+    def _extract_racetime_payload(self, html: str) -> dict[str, dict[str, Any]]:
+        marker = "var GLOBAL_races ="
+        start = html.find(marker)
+        if start == -1:
+            return {}
+
+        start = html.find("{", start)
+        if start == -1:
+            return {}
+
+        depth = 0
+        end = -1
+        for index in range(start, len(html)):
+            char = html[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    end = index + 1
+                    break
+
+        if end == -1:
+            return {}
+
+        try:
+            data = json.loads(html[start:end])
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _racetime_category(
+        self, secondary: str, title: str, sport_type_id: Any
+    ) -> str | None:
+        combined = f"{secondary} {title}".casefold()
+        if "swim" in combined or "заплыв" in combined:
+            return "Плавание"
+        if "триат" in combined or "дуат" in combined:
+            return "Триатлон"
+        if "вело" in combined or "bike" in combined or "cycling" in combined:
+            return "Велоспорт"
+        if "лыж" in combined or "ski" in combined:
+            return "Лыжи"
+        if "трейл" in combined or "бег" in combined or "run" in combined or "марафон" in combined:
+            return "Бег"
+        if isinstance(sport_type_id, int):
+            return self.SPORT_TYPE_MAP.get(sport_type_id)
+        return None
+
+    def _format_racetime_date(self, value: Any) -> str | None:
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            dt = date_parser.isoparse(value)
+        except (ValueError, TypeError):
+            return value
+        return dt.strftime("%d.%m.%Y")
 
 
 class SportidentParser(CssDirectoryParser):

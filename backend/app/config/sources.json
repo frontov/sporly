@@ -198,6 +198,21 @@
       }
     },
     {
+      "name": "RaceTime",
+      "base_url": "https://racetime.online",
+      "listing_urls": [
+        "https://racetime.online",
+        "https://racetime.online/moskvoretsky/7moskvoretsky2026"
+      ],
+      "enabled": true,
+      "parser_type": "racetime",
+      "selectors": {
+        "item": "a.race-card",
+        "title": ".name",
+        "link": "a.race-card"
+      }
+    },
+    {
       "name": "IRONSTAR",
       "base_url": "https://iron-star.com",
       "listing_urls": [

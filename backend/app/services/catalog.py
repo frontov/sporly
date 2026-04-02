@@ -30,6 +30,7 @@ from app.parsers.base import (
     NezhesteamParser,
     OTimeCalendarParser,
     OrgeoParser,
+    RaceTimeParser,
     RegPlaceParser,
     RussiaRunningSeriesParser,
     RuncParser,
@@ -915,6 +916,8 @@ class CatalogService:
             return MarathonCupParser(source_config)
         if source_config.parser_type == "myrace":
             return MyRaceParser(source_config)
+        if source_config.parser_type == "racetime":
+            return RaceTimeParser(source_config)
         if source_config.parser_type == "ironstar":
             return IronStarParser(source_config)
         if source_config.parser_type == "lastrada":
