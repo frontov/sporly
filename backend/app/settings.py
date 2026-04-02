@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cache_version: int = 38
+    cache_version: int = 39
     request_timeout_seconds: float = 15.0
     source_timeout_seconds: float = 45.0
     enrich_timeout_seconds: float = 12.0

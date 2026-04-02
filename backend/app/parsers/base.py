@@ -1644,8 +1644,6 @@ class VelomarathonParser(CssDirectoryParser):
         base_page_url = page_url.split("#", 1)[0]
         for index, card in enumerate(section.select(".t778__col.js-product")):
             href = self._extract_optional_attr(card, "a.js-product-link, a[href]", "href")
-            if href and "reg.place/events/" in href:
-                continue
 
             title = self._extract_optional_text(card, ".t778__title")
             details_node = card.select_one(".t778__descr")
@@ -1663,8 +1661,13 @@ class VelomarathonParser(CssDirectoryParser):
                 continue
 
             synthetic_url = f"{base_page_url}#event-{index + 1}"
+            source_url = (
+                urljoin(page_url, href)
+                if isinstance(href, str) and href.strip()
+                else synthetic_url
+            )
             full_image = urljoin(page_url, image_url) if image_url else None
-            stable_hash = hashlib.sha1(synthetic_url.encode("utf-8")).hexdigest()[:12]
+            stable_hash = hashlib.sha1(source_url.encode("utf-8")).hexdigest()[:12]
 
             events.append(
                 Event(
@@ -1679,7 +1682,7 @@ class VelomarathonParser(CssDirectoryParser):
                     date_text=date_text,
                     starts_at=self._normalize_datetime(date_text),
                     source_name=self.config.name,
-                    source_url=synthetic_url,
+                    source_url=source_url,
                     image_url=full_image,
                 )
             )
