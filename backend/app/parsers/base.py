@@ -190,6 +190,50 @@ class CssDirectoryParser:
 
 
 class RegPlaceParser(CssDirectoryParser):
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        if not self.config.listing_urls:
+            return []
+
+        first_url = self.config.listing_urls[0]
+        try:
+            first_response = await client.get(first_url)
+            first_response.raise_for_status()
+        except httpx.HTTPError:
+            return []
+
+        listing_pages = [str(first_response.url), *self.extract_pagination_urls(first_response.text, str(first_response.url))]
+        event_urls = self._extract_regplace_event_urls(first_response.text, str(first_response.url))
+
+        for page_url in listing_pages[1:]:
+            try:
+                response = await client.get(page_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+            event_urls.extend(self._extract_regplace_event_urls(response.text, str(response.url)))
+
+        unique_urls: list[str] = []
+        seen_urls: set[str] = set()
+        for event_url in event_urls:
+            if event_url in seen_urls:
+                continue
+            seen_urls.add(event_url)
+            unique_urls.append(event_url)
+
+        semaphore = asyncio.Semaphore(10)
+        tasks = [
+            asyncio.create_task(self._fetch_regplace_detail_event(url, client, semaphore))
+            for url in unique_urls
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        events: list[Event] = []
+        for result in results:
+            if isinstance(result, Event):
+                events.append(result)
+        return events
+
     def parse(self, html: str, page_url: str) -> list[Event]:
         soup = BeautifulSoup(html, "html.parser")
         cards = soup.select(".b-event-card")
@@ -232,6 +276,88 @@ class RegPlaceParser(CssDirectoryParser):
             )
 
         return events
+
+    def _extract_regplace_event_urls(self, html: str, page_url: str) -> list[str]:
+        matches = re.findall(r'/(events/[a-z0-9\-]+)', html)
+        urls: list[str] = []
+        seen: set[str] = set()
+        for match in matches:
+            full_url = urljoin(page_url, match)
+            if full_url in seen:
+                continue
+            seen.add(full_url)
+            urls.append(full_url)
+        return urls
+
+    async def _fetch_regplace_detail_event(
+        self,
+        event_url: str,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event | None:
+        async with semaphore:
+            try:
+                response = await client.get(event_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return None
+
+        return self._parse_regplace_detail_page(response.text, str(response.url))
+
+    def _parse_regplace_detail_page(self, html: str, page_url: str) -> Event | None:
+        soup = BeautifulSoup(html, "html.parser")
+        title = self._extract_optional_text(soup, "h1")
+        if not title:
+            return None
+
+        date_text = self._extract_optional_text(soup, "h2")
+        lead_text = self._extract_optional_text(soup, "p.lead.text-muted")
+        description_text = self._extract_optional_text(soup, ".event-description")
+        description_meta = soup.find("meta", attrs={"name": "description"})
+        description_meta_text = (
+            description_meta.get("content")
+            if description_meta and isinstance(description_meta.get("content"), str)
+            else None
+        )
+        keywords_meta = soup.find("meta", attrs={"name": "keywords"})
+        keywords_text = (
+            keywords_meta.get("content")
+            if keywords_meta and isinstance(keywords_meta.get("content"), str)
+            else None
+        )
+        image_url = self._extract_optional_attr(soup, ".cover .logo", "src")
+        location_text = " ".join(
+            part
+            for part in [lead_text, description_meta_text, keywords_text]
+            if part
+        ) or None
+        city = self._extract_regplace_city(location_text, title)
+        venue = self._extract_regplace_venue(location_text)
+        category = self._extract_regplace_category(location_text or description_text or title)
+        full_image = urljoin(page_url, image_url) if image_url else None
+        stable_hash = hashlib.sha1(page_url.encode("utf-8")).hexdigest()[:12]
+
+        return self._enrich_regplace_from_title(
+            Event(
+                id=f"reg-place-detail-{stable_hash}",
+                title=title,
+                description=self._merge_regplace_description(
+                    description_text or description_meta_text,
+                    page_url,
+                    title,
+                ),
+                city=city,
+                region=None,
+                federal_district=None,
+                venue=venue,
+                category=category,
+                date_text=date_text,
+                starts_at=self._normalize_datetime(date_text),
+                source_name=self.config.name,
+                source_url=page_url,
+                image_url=full_image,
+            )
+        )
 
     def _parse_meta(self, meta_text: str | None) -> tuple[str | None, str | None, str | None]:
         if not meta_text:
