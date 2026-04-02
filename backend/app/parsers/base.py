@@ -249,49 +249,52 @@ class RegPlaceParser(CssDirectoryParser):
     async def enrich_events(
         self, events: list[Event], client: httpx.AsyncClient
     ) -> list[Event]:
-        enriched: list[Event] = []
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_regplace_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
 
-        for event in events:
-            if event.date_text and event.city:
-                enriched.append(event)
-                continue
+    async def _enrich_regplace_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.date_text and event.city:
+            return event
 
+        async with semaphore:
             try:
                 response = await client.get(str(event.source_url))
                 response.raise_for_status()
             except httpx.HTTPError:
-                enriched.append(
-                    self._enrich_regplace_from_title(event)
-                )
-                continue
+                return self._enrich_regplace_from_title(event)
 
-            soup = BeautifulSoup(response.text, "html.parser")
-            date_text = event.date_text or self._extract_optional_text(soup, "h2")
-            lead_text = self._extract_optional_text(soup, "p.lead.text-muted")
-            description_meta = soup.find("meta", attrs={"name": "description"})
-            description_text = (
-                description_meta.get("content")
-                if description_meta and isinstance(description_meta.get("content"), str)
-                else None
+        soup = BeautifulSoup(response.text, "html.parser")
+        date_text = event.date_text or self._extract_optional_text(soup, "h2")
+        lead_text = self._extract_optional_text(soup, "p.lead.text-muted")
+        description_meta = soup.find("meta", attrs={"name": "description"})
+        description_text = (
+            description_meta.get("content")
+            if description_meta and isinstance(description_meta.get("content"), str)
+            else None
+        )
+        location_text = lead_text or description_text
+        city = event.city or self._extract_regplace_city(location_text, event.title)
+        venue = event.venue or self._extract_regplace_venue(location_text)
+
+        return self._enrich_regplace_from_title(
+            event.model_copy(
+                update={
+                    "date_text": date_text,
+                    "starts_at": self._normalize_datetime(date_text),
+                    "city": city,
+                    "venue": venue,
+                }
             )
-            location_text = lead_text or description_text
-            city = event.city or self._extract_regplace_city(location_text, event.title)
-            venue = event.venue or self._extract_regplace_venue(location_text)
-
-            enriched.append(
-                self._enrich_regplace_from_title(
-                    event.model_copy(
-                        update={
-                            "date_text": date_text,
-                            "starts_at": self._normalize_datetime(date_text),
-                            "city": city,
-                            "venue": venue,
-                        }
-                    )
-                )
-            )
-
-        return enriched
+        )
 
     def _enrich_regplace_from_title(self, event: Event) -> Event:
         city = event.city or self._extract_regplace_city(None, event.title)
