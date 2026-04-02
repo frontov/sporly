@@ -36,6 +36,7 @@ from app.parsers.base import (
     RussialoppetParser,
     TriNitiCupParser,
     VelomarathonParser,
+    XWatersParser,
     SourceConfig,
     SportidentParser,
     SwimcupParser,
@@ -930,6 +931,8 @@ class CatalogService:
             return VelogearanceParser(source_config)
         if source_config.parser_type == "xcnews":
             return XCNewsParser(source_config)
+        if source_config.parser_type == "xwaters":
+            return XWatersParser(source_config)
         if source_config.parser_type == "galtropa":
             return GaltropaParser(source_config)
         if source_config.parser_type == "nezhesteam":
@@ -1119,6 +1122,11 @@ class CatalogService:
             id_match = re.search(r"(?:^|[?&])id=(\d+)(?:&|$)", source_url)
             if id_match:
                 query = f"id={id_match.group(1)}"
+
+        if host == "www.xcnews.ru" and path == "/index.php":
+            type_match = re.search(r"(?:^|[?&])type=([^&]+)(?:&|$)", source_url)
+            if type_match:
+                query = f"type={type_match.group(1)}"
 
         if host == "iron-star.com" and path.startswith("/en/"):
             path = path[3:]

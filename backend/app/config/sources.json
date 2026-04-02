@@ -328,6 +328,22 @@
       }
     },
     {
+      "name": "X-WATERS",
+      "base_url": "https://x-waters.com",
+      "listing_urls": [
+        "https://x-waters.com/?lang=ru"
+      ],
+      "enabled": true,
+      "parser_type": "xwaters",
+      "selectors": {
+        "item": "a.project_itm.js-event-block",
+        "title": ".project_itm__title",
+        "link": "a.project_itm.js-event-block",
+        "date": ".project_itm__date",
+        "description": ".project_itm__desc"
+      }
+    },
+    {
       "name": "Galtropa",
       "base_url": "https://galtropa.ru",
       "listing_urls": [

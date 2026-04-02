@@ -3046,6 +3046,174 @@ class BorisovoParser(CssDirectoryParser):
         return "Другие"
 
 
+class XWatersParser(CssDirectoryParser):
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        if not self.config.listing_urls:
+            return []
+
+        try:
+            response = await client.get(self.config.listing_urls[0])
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return []
+
+        events = self.parse(response.text, str(response.url))
+        if not events:
+            return []
+
+        semaphore = asyncio.Semaphore(8)
+        tasks = [self._enrich_xwaters_event(event, client, semaphore) for event in events]
+        enriched = await asyncio.gather(*tasks, return_exceptions=True)
+        result: list[Event] = []
+        for original, item in zip(events, enriched):
+            if isinstance(item, Event):
+                result.append(item)
+            else:
+                result.append(original)
+        return result
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+        seen_urls: set[str] = set()
+
+        for index, card in enumerate(soup.select("a.project_itm.js-event-block")):
+            href = card.get("href")
+            if not isinstance(href, str):
+                continue
+
+            full_link = urljoin(page_url, href)
+            if "/events/" not in full_link or full_link in seen_urls:
+                continue
+            seen_urls.add(full_link)
+
+            title = self._extract_optional_text(card, ".project_itm__title")
+            date_text = self._extract_optional_text(card, ".project_itm__date")
+            description = self._extract_optional_text(card, ".project_itm__desc")
+            image_url = None
+            bg = card.select_one(".project_itm__bg")
+            if bg is not None:
+                image_url = bg.get("data-image")
+            if not title or not date_text:
+                continue
+
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+            events.append(
+                Event(
+                    id=f"xwaters-{index}-{stable_hash}",
+                    title=title,
+                    description=description,
+                    city=None,
+                    region=None,
+                    federal_district=None,
+                    venue=None,
+                    category="Плавание",
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=urljoin(page_url, image_url) if isinstance(image_url, str) else None,
+                )
+            )
+
+        return events
+
+    async def _enrich_xwaters_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        title = self._extract_optional_text(soup, "h1.title-event") or event.title
+        subtitle = self._extract_optional_text(soup, "h2.slogan-event")
+        description = event.description or subtitle
+
+        date_text = event.date_text
+        year = self._extract_optional_attr(soup, 'input[name="event_date_year"]', "value")
+        month = self._extract_optional_attr(soup, 'input[name="event_date_month"]', "value")
+        day = self._extract_optional_attr(soup, 'input[name="event_date_day"]', "value")
+        if year and month and day:
+            date_text = f"{day.zfill(2)}.{month.zfill(2)}.{year}"
+
+        location_text = None
+        for node in soup.select(".b_under-menu .b_under_itms .itm, .b_under-menu .b_under_itms h2.itm"):
+            text = node.get_text(" ", strip=True)
+            if not text:
+                continue
+            lowered = text.lower()
+            if any(token in lowered for token in ("км", "миля", "эстафет", "дети")):
+                continue
+            if re.search(r"\d", lowered) and any(month_name in lowered for month_name in (
+                "январ", "феврал", "март", "апрел", "мая", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр"
+            )):
+                continue
+            if "," in text:
+                location_text = text
+                break
+
+        city, region, venue = self._extract_xwaters_location(location_text or "")
+        image_url = self._extract_optional_attr(soup, 'meta[property="og:image"]', "content") or event.image_url
+
+        return event.model_copy(
+            update={
+                "title": title,
+                "description": description,
+                "date_text": date_text,
+                "starts_at": self._normalize_datetime(date_text) or event.starts_at,
+                "city": city or event.city,
+                "region": region or event.region,
+                "venue": venue or event.venue,
+                "image_url": image_url,
+            }
+        )
+
+    def _extract_xwaters_location(
+        self,
+        location_text: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        if not location_text:
+            return None, None, None
+
+        parts = [part.strip(" ,") for part in location_text.split(",") if part.strip(" ,")]
+        if not parts:
+            return None, None, None
+
+        region = None
+        city = None
+        venue = None
+
+        first = parts[0]
+        if any(token in first.lower() for token in ("обл", "край", "республика", "турция", "сербия", "казахстан", "армения", "таиланд", "словения", "черногория", "киргиз", "кыргыз", "мурманская", "калининградская")):
+            region = first
+            if len(parts) > 1:
+                city = parts[1]
+            if len(parts) > 2:
+                venue = ", ".join(parts[2:])
+        else:
+            city = first
+            if len(parts) > 1:
+                venue = ", ".join(parts[1:])
+
+        if city:
+            city = re.sub(r"^(г\.|город)\s*", "", city, flags=re.IGNORECASE).strip()
+        if region:
+            region = region.strip()
+        if venue:
+            venue = venue.strip()
+
+        return city, region, venue
+
+
 class IronStarParser(CssDirectoryParser):
     def parse(self, html: str, page_url: str) -> list[Event]:
         soup = BeautifulSoup(html, "html.parser")
