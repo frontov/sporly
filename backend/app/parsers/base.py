@@ -217,7 +217,7 @@ class RegPlaceParser(CssDirectoryParser):
                 Event(
                     id=f"reg-place-{index}-{stable_hash}",
                     title=title,
-                    description=description,
+                    description=self._merge_regplace_description(description, full_link, title),
                     city=city,
                     region=None,
                     federal_district=None,
@@ -302,6 +302,9 @@ class RegPlaceParser(CssDirectoryParser):
                     "city": city,
                     "venue": venue,
                     "category": category,
+                    "description": self._merge_regplace_description(
+                        event.description, str(event.source_url), event.title
+                    ),
                 }
             )
         )
@@ -375,6 +378,31 @@ class RegPlaceParser(CssDirectoryParser):
             if re.search(pattern, text, flags=re.IGNORECASE):
                 return category
         return None
+
+    def _merge_regplace_description(
+        self,
+        description: str | None,
+        source_url: str,
+        title: str,
+    ) -> str | None:
+        extra: list[str] = []
+        if self._is_mvm_event(source_url, title):
+            extra.append("Серия МВМ 2026")
+        parts = [part for part in [description, " • ".join(extra) if extra else None] if part]
+        return " • ".join(parts) if parts else None
+
+    def _is_mvm_event(self, source_url: str, title: str) -> bool:
+        haystack = f"{source_url} {title}".casefold()
+        markers = (
+            "mvm",
+            "1perviy-etap-mvm",
+            "gabo-velomarathon-2026",
+            "stupinskiy-velomarathon-2026",
+            "yakhromskiy-velomarathon-2026",
+            "moscow-velomarathon-2026",
+            "tomilinskiy-velomarathon-2026",
+        )
+        return any(marker in haystack for marker in markers)
 
 
 class OrgeoParser(CssDirectoryParser):
@@ -1443,6 +1471,8 @@ class MarzocchiCupParser(CssDirectoryParser):
             seen_links.add(full_link)
 
             title = lines[0]
+            if self._should_skip_marzocchi_event(title):
+                continue
             city, venue = self._extract_marzocchi_location(lines)
             date_text = self._extract_marzocchi_date(lines)
             description = " ".join(line for line in lines[1:] if line != date_text)
@@ -1468,6 +1498,14 @@ class MarzocchiCupParser(CssDirectoryParser):
             index += 1
 
         return events
+
+    def _should_skip_marzocchi_event(self, title: str) -> bool:
+        normalized = title.casefold().replace("ё", "е")
+        if re.search(r"^\d+\s*[-йя]?\s*этап\s+tri\s*niti\s+cup", normalized):
+            return True
+        if "общая регистрация" in normalized and "веломарафон" in normalized:
+            return True
+        return False
 
     def _extract_marzocchi_date(self, lines: list[str]) -> str | None:
         for line in lines:
