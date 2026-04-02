@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import json
 import time
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ from app.parsers.base import (
     TriNitiCupParser,
     VelomarathonParser,
     SourceConfig,
+    SportidentParser,
     SourceFieldMap,
     VelogearanceParser,
     XCNewsParser,
@@ -606,16 +608,24 @@ class CatalogService:
     def __init__(self) -> None:
         self._cache: list[Event] = []
         self._cache_created_at = 0.0
+        self._cache_version = 0
         self._refresh_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task[None] | None = None
         self._load_persistent_cache()
 
     async def get_events(self, filters: EventFilters) -> list[Event]:
         if not self._cache:
-            await self._refresh_cache()
+            self._ensure_background_refresh()
         elif self._is_cache_stale():
             self._ensure_background_refresh()
         return self._apply_sort(self._apply_filters(self._normalize_events(self._cache), filters), filters)
+
+    def is_loading(self) -> bool:
+        if self._cache:
+            return False
+        if self._refresh_task and not self._refresh_task.done():
+            return True
+        return self._refresh_lock.locked()
 
     def _is_cache_stale(self) -> bool:
         return (time.time() - self._cache_created_at) > settings.cache_ttl_seconds
@@ -769,6 +779,7 @@ class CatalogService:
 
             self._cache = normalized_events
             self._cache_created_at = time.time()
+            self._cache_version = settings.cache_version
             self._write_persistent_cache()
 
     def _ensure_background_refresh(self) -> None:
@@ -791,19 +802,21 @@ class CatalogService:
         try:
             payload = json.loads(cache_file.read_text(encoding="utf-8"))
             cache_version = int(payload.get("version", 0))
-            if cache_version != settings.cache_version:
-                self._cache = []
-                self._cache_created_at = 0.0
-                return
             items = payload.get("items", [])
             created_at = payload.get("created_at", 0.0)
             self._cache = self._normalize_events(
                 [Event.model_validate(item) for item in items]
             )
-            self._cache_created_at = float(created_at)
+            self._cache_created_at = (
+                float(created_at)
+                if cache_version == settings.cache_version
+                else 0.0
+            )
+            self._cache_version = cache_version
         except (json.JSONDecodeError, OSError, ValueError, TypeError):
             self._cache = []
             self._cache_created_at = 0.0
+            self._cache_version = 0
 
     def _write_persistent_cache(self) -> None:
         cache_file = settings.cache_file
@@ -822,9 +835,31 @@ class CatalogService:
         if not self._cache:
             return False
         if len(next_events) >= len(self._cache):
-            return False
+            return self._has_critical_source_drop(next_events)
         refresh_ratio = len(next_events) / max(len(self._cache), 1)
-        return refresh_ratio < settings.minimum_refresh_ratio
+        return (
+            refresh_ratio < settings.minimum_refresh_ratio
+            or self._has_critical_source_drop(next_events)
+        )
+
+    def _has_critical_source_drop(self, next_events: list[Event]) -> bool:
+        current_counts = Counter(
+            event.source_name or "UNKNOWN" for event in self._cache
+        )
+        next_counts = Counter(
+            event.source_name or "UNKNOWN" for event in next_events
+        )
+
+        for source_name, current_count in current_counts.items():
+            if current_count < 20:
+                continue
+            next_count = next_counts.get(source_name, 0)
+            if next_count == 0:
+                return True
+            if next_count / current_count < 0.5:
+                return True
+
+        return False
 
     def _build_parser(self, source_config: SourceConfig) -> CssDirectoryParser:
         if source_config.parser_type == "reg_place":
@@ -853,6 +888,8 @@ class CatalogService:
             return GoldenUltraParser(source_config)
         if source_config.parser_type == "arf_calendar":
             return ArfCalendarParser(source_config)
+        if source_config.parser_type == "sportident":
+            return SportidentParser(source_config)
         if source_config.parser_type == "velogearance":
             return VelogearanceParser(source_config)
         if source_config.parser_type == "xcnews":
@@ -1034,6 +1071,11 @@ class CatalogService:
             date_match = re.search(r"(?:^|[?&])date=(\d{8})(?:&|$)", source_url)
             if date_match:
                 query = f"date={date_match.group(1)}"
+
+        if host == "sportident.online" and path == "/entry":
+            id_match = re.search(r"(?:^|[?&])id=(\d+)(?:&|$)", source_url)
+            if id_match:
+                query = f"id={id_match.group(1)}"
 
         if host == "iron-star.com" and path.startswith("/en/"):
             path = path[3:]

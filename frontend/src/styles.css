@@ -456,7 +456,9 @@ a {
 .loading-state {
   display: grid;
   gap: 16px;
-  padding: 22px 18px 20px;
+  justify-items: center;
+  text-align: center;
+  padding: 72px 28px 66px;
   margin-bottom: 18px;
   border: 1px solid rgba(20, 33, 29, 0.08);
   border-radius: 24px;
@@ -468,48 +470,44 @@ a {
 }
 
 .loading-state__mark {
-  width: 54px;
-  height: 54px;
-  border-radius: 18px;
+  width: 108px;
+  height: 108px;
   display: grid;
   place-items: center;
-  background: linear-gradient(180deg, rgba(20, 33, 29, 0.96), rgba(31, 48, 42, 0.94));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 14px 28px rgba(16, 27, 22, 0.12);
 }
 
 .loading-state__mark img {
-  width: 30px;
-  height: 30px;
-  animation: loaderFloat 1800ms ease-in-out infinite;
+  width: 86px;
+  height: 86px;
+  animation: loaderSpin 1500ms linear infinite;
 }
 
 .loading-state__copy h2 {
   margin: 0 0 6px;
-  font-size: 1.04rem;
-  line-height: 1.08;
+  font-size: 1.7rem;
+  line-height: 1.04;
   letter-spacing: -0.03em;
   color: var(--accent);
 }
 
 .loading-state__copy p {
   margin: 0;
-  max-width: 32ch;
+  max-width: 40ch;
   color: var(--text-muted);
-  font-size: 0.93rem;
-  line-height: 1.48;
+  font-size: 1.08rem;
+  line-height: 1.58;
 }
 
 .loading-state__tracks {
   display: grid;
   gap: 10px;
+  width: min(520px, 100%);
 }
 
 .loading-state__track {
   position: relative;
   display: block;
-  height: 10px;
+  height: 12px;
   border-radius: 999px;
   overflow: hidden;
   background: rgba(20, 33, 29, 0.06);
@@ -576,6 +574,15 @@ a {
   }
   50% {
     transform: translateY(-2px);
+  }
+}
+
+@keyframes loaderSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 

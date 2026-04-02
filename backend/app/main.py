@@ -58,8 +58,10 @@ async def list_events(
     start = (safe_page - 1) * safe_page_size
     end = start + safe_page_size
     paged_events = events[start:end]
+    is_loading = catalog_service.is_loading()
     return EventsResponse(
         items=paged_events,
+        is_loading=is_loading,
         total=total,
         total_regions=len({event.region for event in events if event.region}),
         total_categories=len({event.category for event in events if event.category}),

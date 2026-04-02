@@ -19,6 +19,7 @@ class Event(BaseModel):
 
 class EventsResponse(BaseModel):
     items: list[Event]
+    is_loading: bool = False
     total: int
     total_regions: int
     total_categories: int

@@ -229,6 +229,20 @@
       }
     },
     {
+      "name": "Sportident",
+      "base_url": "https://sportident.online",
+      "listing_urls": [
+        "https://sportident.online"
+      ],
+      "enabled": true,
+      "parser_type": "sportident",
+      "selectors": {
+        "item": "a.href_entry[href*=\"/entry/?id=\"]",
+        "title": "a.href_entry",
+        "link": "a.href_entry"
+      }
+    },
+    {
       "name": "Velogearance",
       "base_url": "https://velogearance.ru",
       "listing_urls": [

@@ -14,6 +14,7 @@ export type EventItem = {
 
 export type EventsResponse = {
   items: EventItem[];
+  is_loading: boolean;
   total: number;
   total_regions: number;
   total_categories: number;

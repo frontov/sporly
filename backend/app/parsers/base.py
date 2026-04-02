@@ -2331,45 +2331,185 @@ class MyRaceParser(CssDirectoryParser):
 
         return events
 
+
+class SportidentParser(CssDirectoryParser):
+    CATEGORY_MAP = {
+        "0": "Другие",
+        "1": "Лыжи",
+        "2": "Лыжи",
+        "3": "Другие",
+        "4": "Бег",
+        "5": "Лыжи",
+        "6": "Ориентирование и туризм",
+        "7": "Другие",
+        "8": "Плавание",
+        "9": "Велоспорт",
+        "10": "Бег",
+        "11": "Ориентирование и туризм",
+        "12": "Триатлон",
+        "13": "Плавание",
+        "14": "Лыжи",
+        "15": "Бег",
+    }
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+        seen_links: set[str] = set()
+        month_year_by_row: dict[int, str] = {}
+        current_month_year: str | None = None
+
+        for tr in soup.find_all("tr"):
+            month_cell = tr.find("td", class_="month_en")
+            if month_cell is not None:
+                heading = month_cell.get_text(" ", strip=True)
+                if re.search(r"\b20\d{2}\b", heading):
+                    current_month_year = heading
+            month_year_by_row[id(tr)] = current_month_year
+
+        for index, anchor in enumerate(soup.select("a.href_entry[href*='/entry/?id=']")):
+            href = anchor.get("href")
+            if not isinstance(href, str):
+                continue
+
+            full_link = urljoin(page_url, href)
+            if full_link in seen_links:
+                continue
+            seen_links.add(full_link)
+
+            title = anchor.get_text(" ", strip=True)
+            row = anchor.find_parent("tr")
+            if not title or row is None:
+                continue
+
+            date_cell = row.select_one("td.no_sp")
+            icon_node = row.select_one(".ico_type[src]")
+            location_font = row.select_one("font[color='black']")
+            month_year = month_year_by_row.get(id(row))
+
+            date_text = self._normalize_sportident_date_text(
+                date_cell.get_text(" ", strip=True) if date_cell else None,
+                month_year,
+            )
+            raw_location = (
+                location_font.get_text(" ", strip=True)
+                if location_font is not None
+                else None
+            )
+            city, region, venue = self._extract_sportident_location(raw_location)
+            category = self._extract_sportident_category(icon_node)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"sportident-{index}-{stable_hash}",
+                    title=title,
+                    description=None,
+                    city=city,
+                    region=region,
+                    federal_district=None,
+                    venue=venue,
+                    category=category,
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=None,
+                )
+            )
+
+        return events
+
+    def _normalize_sportident_date_text(
+        self, value: str | None, month_year: str | None
+    ) -> str | None:
+        if not value:
+            return None
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        year = self._extract_year_from_heading(month_year)
+        if re.fullmatch(r"\d{2}\.\d{2}", cleaned):
+            return f"{cleaned}.{year}" if year else cleaned
+        if re.fullmatch(r"\d{2}\.\d{2}\s+\d{2}\.\d{2}", cleaned):
+            start = cleaned.split()[0]
+            return f"{start}.{year}" if year else start
+        if re.fullmatch(r"\d{2}\.\d{2}\.\d{4}", cleaned):
+            return cleaned
+        return cleaned
+
+    def _extract_year_from_heading(self, heading: str | None) -> str | None:
+        if not heading:
+            return None
+        match = re.search(r"\b(20\d{2})\b", heading)
+        if match:
+            return match.group(1)
+        return None
+
+    def _extract_sportident_category(self, icon_node: Any) -> str | None:
+        if icon_node is None:
+            return None
+        src = icon_node.get("src")
+        if not isinstance(src, str):
+            return None
+        match = re.search(r"/(\d+)\.png$", src)
+        if not match:
+            return None
+        return self.CATEGORY_MAP.get(match.group(1))
+
+    def _extract_sportident_location(
+        self, raw_location: str | None
+    ) -> tuple[str | None, str | None, str | None]:
+        if not raw_location:
+            return None, None, None
+
+        parts = [part.strip() for part in raw_location.split(">") if part.strip()]
+        if not parts:
+            return None, None, None
+
+        venue = None
+        city = None
+        region = None
+
+        if len(parts) >= 2:
+            region = self._normalize_sportident_region(parts[1])
+        if len(parts) >= 3:
+            city = self._clean_sportident_place(parts[2])
+        if len(parts) >= 4:
+            venue = self._clean_sportident_place(parts[3])
+
+        if city == region:
+            city = None
+        if region == "Москва" and city is None:
+            city = "Москва"
+
+        return city, region, venue
+
+    def _normalize_sportident_region(self, value: str) -> str:
+        cleaned = self._clean_sportident_place(value)
+        replacements = {
+            "Московская обл.": "Московская область",
+            "Ленинградская обл.": "Ленинградская область",
+            "Калининградская обл.": "Калининградская область",
+            "Свердловская обл.": "Свердловская область",
+            "Смоленская обл.": "Смоленская область",
+            "Новосибирская обл.": "Новосибирская область",
+            "Тверская обл.": "Тверская область",
+            "Ярославская обл.": "Ярославская область",
+            "Краснодарский край": "Краснодарский край",
+            "г. Москва": "Москва",
+            "г. Санкт-Петербург": "Санкт-Петербург",
+            " г. Москва": "Москва",
+        }
+        return replacements.get(cleaned, cleaned)
+
+    def _clean_sportident_place(self, value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        cleaned = re.sub(r"^(г\.\s*)", "", cleaned, flags=re.IGNORECASE)
+        return cleaned
+
     async def enrich_events(
         self, events: list[Event], client: httpx.AsyncClient
     ) -> list[Event]:
-        tasks = [
-            self._enrich_myrace_event(event, client)
-            for event in events
-            if not event.city or not event.venue
-        ]
-        if not tasks:
-            return events
-
-        enriched_events = await asyncio.gather(*tasks, return_exceptions=True)
-        updates = {
-            enriched.id: enriched
-            for enriched in enriched_events
-            if isinstance(enriched, Event)
-        }
-        return [updates.get(event.id, event) for event in events]
-
-    async def _enrich_myrace_event(
-        self, event: Event, client: httpx.AsyncClient
-    ) -> Event:
-        try:
-            response = await client.get(str(event.source_url))
-            response.raise_for_status()
-        except httpx.HTTPError:
-            return event
-
-        soup = BeautifulSoup(response.text, "html.parser")
-        hero_city, hero_venue = self._extract_myrace_header_location(soup)
-        location_text = self._extract_myrace_location_text(soup)
-        venue, city = self._split_myrace_location(location_text)
-
-        return event.model_copy(
-            update={
-                "city": hero_city or city or event.city,
-                "venue": hero_venue or venue or event.venue,
-            }
-        )
+        return events
 
     def _extract_myrace_header_location(
         self, soup: BeautifulSoup

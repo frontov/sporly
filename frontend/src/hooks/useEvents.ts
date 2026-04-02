@@ -22,6 +22,7 @@ const buildQuery = (filters: FiltersState, page: number) => {
 export const useEvents = (filters: FiltersState, page: number) => {
   const [data, setData] = useState<EventsResponse>({
     items: [],
+    is_loading: false,
     total: 0,
     total_regions: 0,
     total_categories: 0,
@@ -37,9 +38,13 @@ export const useEvents = (filters: FiltersState, page: number) => {
 
   useEffect(() => {
     const controller = new AbortController();
+    let retryTimer: number | undefined;
 
-    const load = async () => {
-      setLoading(true);
+    const load = async (showLoading = true) => {
+      retryTimer = undefined;
+      if (showLoading) {
+        setLoading(true);
+      }
       setError(null);
 
       try {
@@ -54,19 +59,32 @@ export const useEvents = (filters: FiltersState, page: number) => {
 
         const payload = (await response.json()) as EventsResponse;
         setData(payload);
+        if (payload.is_loading) {
+          retryTimer = window.setTimeout(() => {
+            void load(false);
+          }, 1500);
+          return;
+        }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
         }
         setError("Не удалось загрузить события. Проверьте backend и конфиг источников.");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted && retryTimer === undefined) {
+          setLoading(false);
+        }
       }
     };
 
     void load();
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+      }
+    };
   }, [filters, page]);
 
   return { data, loading, error };
