@@ -609,6 +609,9 @@ class CatalogService:
         self._cache: list[Event] = []
         self._cache_created_at = 0.0
         self._cache_version = 0
+        self._available_cities: list[str] = []
+        self._available_categories: list[str] = []
+        self._available_sources: list[str] = []
         self._refresh_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task[None] | None = None
         self._load_persistent_cache()
@@ -618,7 +621,14 @@ class CatalogService:
             self._ensure_background_refresh()
         elif self._is_cache_stale():
             self._ensure_background_refresh()
-        return self._apply_sort(self._apply_filters(self._normalize_events(self._cache), filters), filters)
+        return self._apply_sort(self._apply_filters(self._cache, filters), filters)
+
+    def get_filter_metadata(self) -> tuple[list[str], list[str], list[str]]:
+        return (
+            list(self._available_cities),
+            list(self._available_categories),
+            list(self._available_sources),
+        )
 
     def is_loading(self) -> bool:
         if self._cache:
@@ -780,6 +790,7 @@ class CatalogService:
             self._cache = normalized_events
             self._cache_created_at = time.time()
             self._cache_version = settings.cache_version
+            self._rebuild_filter_metadata()
             self._write_persistent_cache()
 
     def _ensure_background_refresh(self) -> None:
@@ -813,10 +824,14 @@ class CatalogService:
                 else 0.0
             )
             self._cache_version = cache_version
+            self._rebuild_filter_metadata()
         except (json.JSONDecodeError, OSError, ValueError, TypeError):
             self._cache = []
             self._cache_created_at = 0.0
             self._cache_version = 0
+            self._available_cities = []
+            self._available_categories = []
+            self._available_sources = []
 
     def _write_persistent_cache(self) -> None:
         cache_file = settings.cache_file
@@ -860,6 +875,15 @@ class CatalogService:
                 return True
 
         return False
+
+    def _rebuild_filter_metadata(self) -> None:
+        self._available_cities = self.build_available_cities(self._cache)
+        self._available_categories = sorted(
+            {event.category for event in self._cache if event.category}
+        )
+        self._available_sources = sorted(
+            {event.source_name for event in self._cache if event.source_name}
+        )
 
     def _build_parser(self, source_config: SourceConfig) -> CssDirectoryParser:
         if source_config.parser_type == "reg_place":

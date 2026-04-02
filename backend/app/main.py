@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Query
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.schemas.event import EventsResponse
@@ -19,6 +20,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 catalog_service = CatalogService()
 
@@ -40,7 +42,6 @@ async def list_events(
     page: int = 1,
     page_size: int = 24,
 ) -> EventsResponse:
-    all_events = await catalog_service.get_events(filters=EventFilters())
     filters = EventFilters(
         query=q,
         cities=city,
@@ -51,6 +52,9 @@ async def list_events(
         sort_by=sort_by,
     )
     events = await catalog_service.get_events(filters=filters)
+    available_cities, available_categories, available_sources = (
+        catalog_service.get_filter_metadata()
+    )
     safe_page_size = min(max(page_size, 1), 60)
     total = len(events)
     total_pages = max((total + safe_page_size - 1) // safe_page_size, 1)
@@ -68,7 +72,7 @@ async def list_events(
         page=safe_page,
         page_size=safe_page_size,
         total_pages=total_pages,
-        available_cities=catalog_service.build_available_cities(all_events),
-        available_categories=sorted({event.category for event in all_events if event.category}),
-        available_sources=sorted({event.source_name for event in all_events if event.source_name}),
+        available_cities=available_cities,
+        available_categories=available_categories,
+        available_sources=available_sources,
     )
