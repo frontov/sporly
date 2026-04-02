@@ -4,7 +4,7 @@
       "name": "REGPLACE",
       "base_url": "https://reg.place",
       "listing_urls": [
-        "https://reg.place/"
+        "https://reg.place/events"
       ],
       "enabled": true,
       "parser_type": "reg_place",
