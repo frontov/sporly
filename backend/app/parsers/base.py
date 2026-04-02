@@ -512,7 +512,9 @@ class RegPlaceParser(CssDirectoryParser):
         title: str,
     ) -> str | None:
         extra: list[str] = []
-        if self._is_mvm_event(source_url, title):
+        if self._is_mvm_event(source_url, title) and (
+            not description or "серия мвм 2026" not in description.casefold()
+        ):
             extra.append("Серия МВМ 2026")
         parts = [part for part in [description, " • ".join(extra) if extra else None] if part]
         return " • ".join(parts) if parts else None
@@ -1799,7 +1801,10 @@ class VelomarathonParser(CssDirectoryParser):
                 Event(
                     id=f"velomarathon-{index}-{stable_hash}",
                     title=self._normalize_velomarathon_title(title),
-                    description=None,
+                    description=self._build_velomarathon_description(
+                        title=title,
+                        source_url=source_url,
+                    ),
                     city=self._extract_velomarathon_city(venue),
                     region=self._extract_velomarathon_region(venue),
                     federal_district=None,
@@ -1814,6 +1819,28 @@ class VelomarathonParser(CssDirectoryParser):
             )
 
         return events
+
+    def _build_velomarathon_description(
+        self,
+        title: str,
+        source_url: str,
+    ) -> str | None:
+        normalized_title = title.casefold()
+        if "мвм" in normalized_title:
+            return "Серия МВМ 2026"
+        if "reg.place/events/" in source_url and any(
+            marker in source_url
+            for marker in (
+                "1perviy-etap-mvm-2026",
+                "gabo-velomarathon-2026",
+                "stupinskiy-velomarathon-2026",
+                "yakhromskiy-velomarathon-2026",
+                "moscow-velomarathon-2026",
+                "tomilinskiy-velomarathon-2026",
+            )
+        ):
+            return "Серия МВМ 2026"
+        return None
 
     def _normalize_velomarathon_title(self, title: str) -> str:
         normalized = re.sub(r"\s+", " ", title.replace("–", " — ")).strip()
