@@ -100,6 +100,7 @@ a {
   margin-bottom: 18px;
   overflow: hidden;
   position: relative;
+  max-width: 100%;
 }
 
 .filters[open] {
@@ -323,6 +324,7 @@ a {
   background: transparent;
   min-height: auto;
   align-self: stretch;
+  min-width: 0;
 }
 
 .category-chips {
@@ -348,6 +350,7 @@ a {
     box-shadow 140ms ease,
     border-color 140ms ease,
     background-color 140ms ease;
+  max-width: 100%;
 }
 
 .category-chip--active {
@@ -375,6 +378,7 @@ a {
   font: inherit;
   font-size: 0.82rem;
   cursor: pointer;
+  max-width: 100%;
 }
 
 .field span {
@@ -441,6 +445,7 @@ a {
     box-shadow 140ms ease,
     border-color 140ms ease,
     background-color 140ms ease;
+  max-width: 100%;
 }
 
 .city-chip--active {
@@ -1033,6 +1038,16 @@ code {
 }
 
 @media (max-width: 640px) {
+  .filters,
+  .filters__body,
+  .filters__section,
+  .filters__toolbar,
+  .filters__cluster,
+  .filters__advanced-panel,
+  .field {
+    min-width: 0;
+  }
+
   .filters__summary {
     position: sticky;
     top: 8px;
@@ -1089,6 +1104,8 @@ code {
   .filters[open] {
     position: fixed;
     inset: 10px;
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
     z-index: 120;
     margin: 0;
     border-radius: 26px;
@@ -1113,7 +1130,8 @@ code {
 
   .filters[open] .filters__body {
     max-height: calc(100dvh - 120px);
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     padding-bottom: 176px;
   }
 
@@ -1133,6 +1151,8 @@ code {
     min-height: 34px;
     padding: 0 11px;
     font-size: 0.8rem;
+    white-space: normal;
+    text-align: left;
   }
 
   .category-chips,
