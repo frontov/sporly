@@ -2746,50 +2746,304 @@ class SportidentParser(CssDirectoryParser):
     ) -> list[Event]:
         return events
 
-    def _extract_myrace_header_location(
-        self, soup: BeautifulSoup
-    ) -> tuple[str | None, str | None]:
-        header = soup.select_one(".mt-5.text-large")
-        if not header:
-            return None, None
 
-        city = self._extract_text(header, ".text-strong")
-        venue = self._extract_text(header, ".text-muted.text-regular")
-        normalized_city = None if city in {None, "-", "—"} else city
-        normalized_venue = None if venue in {None, "-", "—"} else venue
-        return normalized_city, normalized_venue
+class LaStradaParser(CssDirectoryParser):
+    API_URL = "https://heroleague.ru/api/event_city/type/lastrada"
 
-    def _extract_myrace_location_text(self, soup: BeautifulSoup) -> str | None:
-        for paragraph in soup.select(".event-about p"):
-            text = paragraph.get_text(" ", strip=True)
-            match = re.search(
-                r"Место проведения:\s*(.+?)(?:Дата проведения:|Карта:|$)",
-                text,
-                re.IGNORECASE,
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        try:
+            response = await client.get(self.API_URL)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return []
+
+        payload = response.json()
+        values = payload.get("values")
+        if not isinstance(values, list):
+            return []
+
+        events: list[Event] = []
+        seen_urls: set[str] = set()
+
+        for index, item in enumerate(values):
+            if not isinstance(item, dict):
+                continue
+
+            event_info = item.get("event")
+            if not isinstance(event_info, dict):
+                continue
+
+            title = self._extract_lastrada_title(event_info, item)
+            starts_at = item.get("start_time")
+            if not title or not isinstance(starts_at, str):
+                continue
+
+            source_url = self._extract_lastrada_url(event_info, item)
+            if source_url in seen_urls:
+                continue
+            seen_urls.add(source_url)
+
+            city_info = item.get("city") if isinstance(item.get("city"), dict) else {}
+            city = city_info.get("name_ru") if isinstance(city_info.get("name_ru"), str) else None
+            address = item.get("address") if isinstance(item.get("address"), str) else None
+            image_path = item.get("info", {}).get("map_preview") if isinstance(item.get("info"), dict) else None
+            image_url = (
+                urljoin("https://heroleague.ru", image_path)
+                if isinstance(image_path, str) and image_path
+                else None
             )
-            if match:
-                return match.group(1).strip(" ,")
+            stable_hash = hashlib.sha1(source_url.encode("utf-8")).hexdigest()[:12]
 
-        for paragraph in soup.select(".event-about p"):
-            text = paragraph.get_text(" ", strip=True)
-            match = re.search(r"Локация:\s*(.+?)(?:Карта:|$)", text, re.IGNORECASE)
-            if match:
-                return match.group(1).strip(" ,")
+            events.append(
+                Event(
+                    id=f"lastrada-{index}-{stable_hash}",
+                    title=title,
+                    description=address,
+                    city=city,
+                    region=None,
+                    federal_district=None,
+                    venue=address,
+                    category=self._extract_lastrada_category(event_info, item),
+                    date_text=starts_at,
+                    starts_at=starts_at,
+                    source_name=self.config.name,
+                    source_url=source_url,
+                    image_url=image_url,
+                )
+            )
 
-        header_location = soup.select_one(".text-muted.text-regular")
-        if header_location:
-            return header_location.get_text(" ", strip=True)
+        return events
+
+    def _extract_lastrada_title(self, event_info: dict[str, Any], item: dict[str, Any]) -> str | None:
+        title_above = event_info.get("title_above")
+        title = event_info.get("title")
+        if isinstance(title_above, str) and title_above.strip():
+            return f"La Strada — {title_above.strip()}"
+        if isinstance(title, str) and title.strip():
+            return title.strip()
         return None
 
-    def _split_myrace_location(self, raw_location: str | None) -> tuple[str | None, str | None]:
-        if not raw_location:
-            return None, None
+    def _extract_lastrada_url(self, event_info: dict[str, Any], item: dict[str, Any]) -> str:
+        external_url = event_info.get("external_url")
+        public_id = item.get("public_id")
+        if isinstance(external_url, str) and external_url.strip():
+            anchor = public_id if isinstance(public_id, str) and public_id.strip() else None
+            return f"{external_url.strip()}#{anchor}" if anchor else external_url.strip()
+        return self.config.base_url
 
-        cleaned = re.sub(r"\s+", " ", raw_location).strip(" ,")
-        parts = [part.strip(" ,") for part in cleaned.split(",") if part.strip(" ,")]
-        if len(parts) >= 2:
-            return parts[0], parts[-1]
-        return None, cleaned
+    def _extract_lastrada_category(
+        self,
+        event_info: dict[str, Any],
+        item: dict[str, Any],
+    ) -> str:
+        text = " ".join(
+            str(part or "")
+            for part in (
+                event_info.get("title"),
+                event_info.get("title_above"),
+                event_info.get("external_url"),
+                item.get("event_public_id"),
+            )
+        ).lower()
+        if "офф-роуд" in text or "offroad" in text or "бездорож" in text:
+            return "Велоспорт"
+        if "велогон" in text or "cycling" in text or "criterium" in text or "критериум" in text:
+            return "Велоспорт"
+        if "фестив" in text or "festival" in text:
+            return "Велоспорт"
+        return "Велоспорт"
+
+class CityTrailParser(CssDirectoryParser):
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        if not self.config.listing_urls:
+            return []
+
+        try:
+            response = await client.get(self.config.listing_urls[0])
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return []
+
+        html = response.text
+        page_url = str(response.url)
+        soup = BeautifulSoup(html, "html.parser")
+        myrace_links = self._extract_citytrail_myrace_links(html)
+        city_pages = self._extract_citytrail_pages(soup, page_url)
+        if not myrace_links:
+            return []
+
+        semaphore = asyncio.Semaphore(6)
+
+        async def load_event(index: int, myrace_url: str) -> Event | None:
+            async with semaphore:
+                try:
+                    detail_response = await client.get(myrace_url)
+                    detail_response.raise_for_status()
+                except httpx.HTTPError:
+                    return None
+            return self._parse_citytrail_detail(
+                detail_response.text,
+                myrace_url,
+                city_pages.get(index),
+                index,
+            )
+
+        tasks = [
+            load_event(index, url)
+            for index, url in sorted(myrace_links.items())
+        ]
+        loaded = await asyncio.gather(*tasks)
+        return [event for event in loaded if event is not None]
+
+    def _extract_citytrail_myrace_links(self, html: str) -> dict[int, str]:
+        matches = re.findall(
+            r'"js_city_(\d+)_click_reg"\s*:\s*"([^"]+myrace\.info/events/\d+)"',
+            html,
+        )
+        result: dict[int, str] = {}
+        for index_str, url in matches:
+            result[int(index_str)] = url
+        return result
+
+    def _extract_citytrail_pages(self, soup: BeautifulSoup, page_url: str) -> dict[int, str]:
+        pages: dict[int, str] = {}
+        for anchor in soup.select('a[href^="/"] .tn-atom__button-text'):
+            parent = anchor.parent
+            if parent is None:
+                continue
+            href = parent.get("href")
+            if not isinstance(href, str):
+                continue
+            match = re.fullmatch(r"/(\d+)", href.strip())
+            if not match:
+                continue
+            pages[int(match.group(1))] = urljoin(page_url, href)
+        return pages
+
+    def _parse_citytrail_detail(
+        self,
+        html: str,
+        myrace_url: str,
+        source_url: str | None,
+        index: int,
+    ) -> Event | None:
+        soup = BeautifulSoup(html, "html.parser")
+        title = self._extract_optional_text(soup, ".heading-huge")
+        date_text = self._extract_optional_text(soup, ".text-large.text-strong")
+        if not title or not date_text:
+            return None
+
+        city = self._extract_optional_text(soup, ".mt-5.text-large .text-strong")
+        venue = self._extract_optional_text(soup, ".mt-5.text-large .text-muted.text-regular")
+        category = self._extract_optional_text(soup, ".event-details .type")
+        description = self._extract_optional_text(soup, ".event-about p")
+        image_url = self._extract_citytrail_image(soup, myrace_url)
+        final_url = source_url or f"{self.config.base_url.rstrip('/')}/#{index}"
+        stable_hash = hashlib.sha1(final_url.encode("utf-8")).hexdigest()[:12]
+
+        return Event(
+            id=f"city-trail-{index}-{stable_hash}",
+            title=title,
+            description=description,
+            city=None if city in {None, "-", "—"} else city,
+            region=None,
+            federal_district=None,
+            venue=None if venue in {None, "-", "—"} else venue,
+            category=category or "Бег",
+            date_text=date_text,
+            starts_at=self._normalize_datetime(date_text),
+            source_name=self.config.name,
+            source_url=final_url,
+            image_url=image_url,
+        )
+
+    def _extract_citytrail_image(self, soup: BeautifulSoup, page_url: str) -> str | None:
+        image_block = soup.select_one(".event-image")
+        style = image_block.get("style") if image_block is not None else None
+        if not isinstance(style, str):
+            return None
+        match = re.search(r"url\(['\"]?([^'\")]+)", style)
+        if not match:
+            return None
+        return urljoin(page_url, match.group(1))
+
+
+class BorisovoParser(CssDirectoryParser):
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+
+        for index, article in enumerate(soup.select("article.post")):
+            title = self._extract_optional_text(article, ".entry-title")
+            href = self._extract_optional_attr(article, ".entry-title a[href]", "href")
+            if not title or not href:
+                continue
+
+            date_text = self._extract_borisovo_event_date(title)
+            if not date_text or "2026" not in date_text:
+                continue
+
+            description = self._extract_optional_text(article, "p.has-black-color.has-text-color")
+            image = self._extract_borisovo_image(article)
+            full_link = urljoin(page_url, href)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"borisovo-{index}-{stable_hash}",
+                    title=title.rstrip("!"),
+                    description=description,
+                    city="Серпухов",
+                    region="Московская область",
+                    federal_district=None,
+                    venue="Борисово",
+                    category=self._extract_borisovo_category(title, description),
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=image,
+                )
+            )
+
+        return events
+
+    def _extract_borisovo_event_date(self, title: str) -> str | None:
+        match = re.search(
+            r"(\d{1,2}[./]\d{1,2}[./]20\d{2})",
+            title,
+        )
+        if not match:
+            return None
+        return match.group(1).replace("/", ".")
+
+    def _extract_borisovo_image(self, article: Any) -> str | None:
+        image_node = article.select_one(".blog-post-blocks-inner-img")
+        style = image_node.get("style") if image_node is not None else None
+        if not isinstance(style, str):
+            return None
+        match = re.search(r"url\(([^)]+)\)", style)
+        if not match:
+            return None
+        return match.group(1).strip("'\"")
+
+    def _extract_borisovo_category(
+        self,
+        title: str,
+        description: str | None,
+    ) -> str:
+        text = f"{title} {description or ''}".casefold()
+        if "лыж" in text:
+            return "Лыжи"
+        if "trail" in text or "трейл" in text or "кросс" in text:
+            return "Бег"
+        if "вело" in text or "xcm" in text:
+            return "Велоспорт"
+        return "Другие"
 
 
 class IronStarParser(CssDirectoryParser):

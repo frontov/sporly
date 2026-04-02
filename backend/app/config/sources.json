@@ -142,6 +142,20 @@
       }
     },
     {
+      "name": "City Trail",
+      "base_url": "https://city-trail.ru",
+      "listing_urls": [
+        "https://city-trail.ru"
+      ],
+      "enabled": true,
+      "parser_type": "city_trail",
+      "selectors": {
+        "item": "body",
+        "title": "title",
+        "link": "a[href]"
+      }
+    },
+    {
       "name": "O-Time",
       "base_url": "https://reg.o-time.ru",
       "listing_urls": [
@@ -198,6 +212,20 @@
         "date": ".event-head-info .date",
         "city": ".event-head-info .place",
         "image": ".event-image img"
+      }
+    },
+    {
+      "name": "La Strada",
+      "base_url": "https://lastradarace.ru",
+      "listing_urls": [
+        "https://lastradarace.ru"
+      ],
+      "enabled": true,
+      "parser_type": "lastrada",
+      "selectors": {
+        "item": "body",
+        "title": "title",
+        "link": "a[href]"
       }
     },
     {
@@ -260,6 +288,7 @@
       "name": "Velogearance",
       "base_url": "https://velogearance.ru",
       "listing_urls": [
+        "https://velogearance.ru/",
         "https://velogearance.ru/category/races/"
       ],
       "enabled": true,
@@ -329,6 +358,20 @@
         "item": "#content .col-lg-4",
         "title": "h3",
         "link": "a[href]"
+      }
+    },
+    {
+      "name": "Borisovo.cluB",
+      "base_url": "https://borisovo.club",
+      "listing_urls": [
+        "https://borisovo.club"
+      ],
+      "enabled": true,
+      "parser_type": "borisovo",
+      "selectors": {
+        "item": "article.post",
+        "title": ".entry-title",
+        "link": ".entry-title a"
       }
     }
   ]

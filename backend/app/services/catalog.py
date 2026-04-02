@@ -17,10 +17,13 @@ from app.parsers.base import (
     ArfCalendarParser,
     CyclingRaceParser,
     CssDirectoryParser,
+    CityTrailParser,
     GaltropaParser,
     GoldenUltraParser,
     GranFondoParser,
     IronStarParser,
+    BorisovoParser,
+    LaStradaParser,
     MarzocchiCupParser,
     MarathonCupParser,
     MyRaceParser,
@@ -901,6 +904,8 @@ class CatalogService:
             return GranFondoParser(source_config)
         if source_config.parser_type == "cyclingrace":
             return CyclingRaceParser(source_config)
+        if source_config.parser_type == "city_trail":
+            return CityTrailParser(source_config)
         if source_config.parser_type == "velomarathon":
             return VelomarathonParser(source_config)
         if source_config.parser_type == "otime_calendar":
@@ -911,6 +916,8 @@ class CatalogService:
             return MyRaceParser(source_config)
         if source_config.parser_type == "ironstar":
             return IronStarParser(source_config)
+        if source_config.parser_type == "lastrada":
+            return LaStradaParser(source_config)
         if source_config.parser_type == "goldenultra":
             return GoldenUltraParser(source_config)
         if source_config.parser_type == "arf_calendar":
@@ -927,6 +934,8 @@ class CatalogService:
             return GaltropaParser(source_config)
         if source_config.parser_type == "nezhesteam":
             return NezhesteamParser(source_config)
+        if source_config.parser_type == "borisovo":
+            return BorisovoParser(source_config)
         if source_config.parser_type == "orgeo":
             return OrgeoParser(source_config)
         if source_config.parser_type == "runc":
@@ -1084,10 +1093,15 @@ class CatalogService:
         if not normalized:
             return ""
 
+        parsed_with_fragment = urlparse(normalized)
+        host_with_fragment = parsed_with_fragment.netloc.lower()
+        fragment_value = parsed_with_fragment.fragment.strip()
         preserve_fragment = ""
         fragment_match = re.search(r"#(stage-\d+|event-\d+)$", normalized)
         if fragment_match:
             preserve_fragment = f"#{fragment_match.group(1).lower()}"
+        elif host_with_fragment in {"city-trail.ru", "www.city-trail.ru", "stradarace.ru", "www.stradarace.ru"} and fragment_value:
+            preserve_fragment = f"#{fragment_value.lower()}"
 
         normalized = re.sub(r"#.*$", "", normalized)
         normalized = normalized.rstrip("/")
