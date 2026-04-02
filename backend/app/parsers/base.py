@@ -1424,80 +1424,7 @@ class ArtaSportParser(CssDirectoryParser):
 
 class MarzocchiCupParser(CssDirectoryParser):
     def parse(self, html: str, page_url: str) -> list[Event]:
-        soup = BeautifulSoup(html, "html.parser")
-        events: list[Event] = []
-        seen_links: set[str] = set()
-        current_group: str | None = None
-
-        tournaments_header = soup.find("h2", string=lambda text: isinstance(text, str) and "ТУРНИРЫ" in text)
-        if tournaments_header is None:
-            return events
-
-        index = 0
-        for node in tournaments_header.find_all_next():
-            if node.name == "h2" and node is not tournaments_header:
-                break
-
-            if node.name == "h3":
-                current_group = node.get_text(" ", strip=True)
-                continue
-
-            if node.name != "a":
-                continue
-
-            href = node.get("href")
-            if not isinstance(href, str) or "Подробнее" not in node.get_text(" ", strip=True):
-                continue
-
-            card = node.parent
-            if card is None:
-                continue
-
-            description_block = card.select_one("span")
-            if description_block is None:
-                continue
-
-            lines = [
-                line.strip(" .")
-                for line in description_block.get_text("\n", strip=True).splitlines()
-                if line.strip()
-            ]
-            if not lines:
-                continue
-
-            full_link = urljoin(page_url, href)
-            if full_link in seen_links:
-                continue
-            seen_links.add(full_link)
-
-            title = lines[0]
-            if self._should_skip_marzocchi_event(title):
-                continue
-            city, venue = self._extract_marzocchi_location(lines)
-            date_text = self._extract_marzocchi_date(lines)
-            description = " ".join(line for line in lines[1:] if line != date_text)
-            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
-
-            events.append(
-                Event(
-                    id=f"marzocchi-cup-{index}-{stable_hash}",
-                    title=title,
-                    description=(f"{current_group}. {description}" if current_group and description else description or current_group),
-                    city=city,
-                    region=self._extract_marzocchi_region(venue),
-                    federal_district=None,
-                    venue=venue,
-                    category=self._infer_marzocchi_category(title, current_group),
-                    date_text=date_text,
-                    starts_at=self._normalize_datetime(date_text),
-                    source_name=self.config.name,
-                    source_url=full_link,
-                    image_url=None,
-                )
-            )
-            index += 1
-
-        return events
+        return TriNitiCupParser(self.config).parse(html, page_url)
 
     def _should_skip_marzocchi_event(self, title: str) -> bool:
         normalized = title.casefold().replace("ё", "е")
@@ -1546,39 +1473,7 @@ class MarzocchiCupParser(CssDirectoryParser):
     async def enrich_events(
         self, events: list[Event], client: httpx.AsyncClient
     ) -> list[Event]:
-        enriched: list[Event] = []
-
-        for event in events:
-            if event.starts_at and event.city:
-                enriched.append(event)
-                continue
-
-            try:
-                response = await client.get(str(event.source_url))
-                response.raise_for_status()
-            except httpx.HTTPError:
-                enriched.append(event)
-                continue
-
-            text = BeautifulSoup(response.text, "html.parser").get_text("\n", strip=True)
-            date_text = event.date_text or self._extract_marzocchi_text_date(text)
-            venue = event.venue or self._extract_marzocchi_text_venue(text)
-            city = event.city or self._extract_marzocchi_text_city(text, venue)
-            region = event.region or self._extract_marzocchi_region(venue)
-
-            enriched.append(
-                event.model_copy(
-                    update={
-                        "date_text": date_text,
-                        "starts_at": self._normalize_datetime(date_text),
-                        "city": city,
-                        "region": region,
-                        "venue": venue,
-                    }
-                )
-            )
-
-        return enriched
+        return events
 
     def _extract_marzocchi_text_date(self, text: str) -> str | None:
         match = re.search(

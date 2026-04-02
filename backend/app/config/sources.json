@@ -101,24 +101,10 @@
       "name": "Marzocchi Cup",
       "base_url": "https://cup.marzocchi.ru",
       "listing_urls": [
-        "https://cup.marzocchi.ru/registratsiya/"
-      ],
-      "enabled": true,
-      "parser_type": "marzocchi_cup",
-      "selectors": {
-        "item": "a",
-        "title": "span",
-        "link": "a"
-      }
-    },
-    {
-      "name": "TRI NITI CUP",
-      "base_url": "https://cup.marzocchi.ru",
-      "listing_urls": [
         "https://cup.marzocchi.ru/tournaments/tourns_3.html"
       ],
       "enabled": true,
-      "parser_type": "tri_niti_cup",
+      "parser_type": "marzocchi_cup",
       "selectors": {
         "item": "p",
         "title": "p",
