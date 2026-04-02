@@ -329,13 +329,14 @@ class RegPlaceParser(CssDirectoryParser):
             else None
         )
         image_url = self._extract_optional_attr(soup, ".cover .logo", "src")
+        page_location_text, venue = self._extract_regplace_location_block(soup)
         location_text = " ".join(
             part
-            for part in [lead_text, description_meta_text, keywords_text]
+            for part in [lead_text, description_meta_text, keywords_text, page_location_text]
             if part
         ) or None
         city = self._extract_regplace_city(location_text, title)
-        venue = self._extract_regplace_venue(location_text)
+        venue = venue or self._extract_regplace_venue(location_text)
         category = self._extract_regplace_category(location_text or description_text or title)
         full_image = urljoin(page_url, image_url) if image_url else None
         stable_hash = hashlib.sha1(page_url.encode("utf-8")).hexdigest()[:12]
@@ -416,11 +417,14 @@ class RegPlaceParser(CssDirectoryParser):
             if keywords_meta and isinstance(keywords_meta.get("content"), str)
             else None
         )
+        page_location_text, page_venue = self._extract_regplace_location_block(soup)
         location_text = " ".join(
-            part for part in [lead_text, description_text, keywords_text] if part
+            part
+            for part in [lead_text, description_text, keywords_text, page_location_text]
+            if part
         ) or None
         city = event.city or self._extract_regplace_city(location_text, event.title)
-        venue = event.venue or self._extract_regplace_venue(location_text)
+        venue = event.venue or page_venue or self._extract_regplace_venue(location_text)
         category = event.category or self._extract_regplace_category(location_text)
 
         return self._enrich_regplace_from_title(
@@ -442,6 +446,33 @@ class RegPlaceParser(CssDirectoryParser):
         city = event.city or self._extract_regplace_city(None, event.title)
         return event.model_copy(update={"city": city})
 
+    def _extract_regplace_location_block(
+        self,
+        soup: BeautifulSoup,
+    ) -> tuple[str | None, str | None]:
+        location_parts: list[str] = []
+        venue: str | None = None
+
+        location_map = soup.select_one("event-location-map[address]")
+        if location_map and isinstance(location_map.get("address"), str):
+            address = location_map.get("address", "").strip()
+            if address:
+                location_parts.append(address)
+                venue = address
+
+        place_heading = soup.find(id="place")
+        if place_heading:
+            place_paragraph = place_heading.find_next("p")
+            if place_paragraph:
+                place_text = place_paragraph.get_text(" ", strip=True)
+                if place_text:
+                    location_parts.append(place_text)
+                    if not venue:
+                        venue = re.split(r"\.\s+", place_text, maxsplit=1)[-1].strip()
+
+        location_text = " ".join(part for part in location_parts if part).strip() or None
+        return location_text, venue
+
     def _extract_regplace_city(self, location_text: str | None, title: str) -> str | None:
         combined = " ".join(part for part in [location_text, title] if part)
         if not combined:
@@ -454,6 +485,7 @@ class RegPlaceParser(CssDirectoryParser):
             (r"\bЗеленоград\b", "Зеленоград"),
             (r"\bКрасногорск\b", "Красногорск"),
             (r"\bКотельники\b", "Котельники"),
+            (r"\bРязань\b", "Рязань"),
             (r"\bСочи\b", "Сочи"),
             (r"\bКазань\b", "Казань"),
             (r"\bТрубино\b", "Трубино"),
@@ -464,6 +496,7 @@ class RegPlaceParser(CssDirectoryParser):
             (r"\bОр[её]л\b", "Орёл"),
             (r"\bИваново\b", "Иваново"),
             (r"\bКалязин\b", "Калязин"),
+            (r"\bСергиев[-\s]?Посад\b", "Сергиев Посад"),
             (r"\bСтупино\b", "Ступино"),
             (r"\bПл[её]с\b", "Плес"),
             (r"\bКинешма\b", "Кинешма"),
@@ -475,6 +508,8 @@ class RegPlaceParser(CssDirectoryParser):
             (r"\bПирогово\b", "Пирогово"),
             (r"\bБердигестях\b", "Бердигестях"),
             (r"\bАбзелиловск", "Абзелиловский район"),
+            (r"\bПетропавловск[-\s]?Камчатск", "Петропавловск-Камчатский"),
+            (r"\bОдинцово\b", "Одинцово"),
         ]
         for pattern, city in city_patterns:
             if re.search(pattern, combined, flags=re.IGNORECASE):
