@@ -281,9 +281,18 @@ class RegPlaceParser(CssDirectoryParser):
             if description_meta and isinstance(description_meta.get("content"), str)
             else None
         )
-        location_text = lead_text or description_text
+        keywords_meta = soup.find("meta", attrs={"name": "keywords"})
+        keywords_text = (
+            keywords_meta.get("content")
+            if keywords_meta and isinstance(keywords_meta.get("content"), str)
+            else None
+        )
+        location_text = " ".join(
+            part for part in [lead_text, description_text, keywords_text] if part
+        ) or None
         city = event.city or self._extract_regplace_city(location_text, event.title)
         venue = event.venue or self._extract_regplace_venue(location_text)
+        category = event.category or self._extract_regplace_category(location_text)
 
         return self._enrich_regplace_from_title(
             event.model_copy(
@@ -292,6 +301,7 @@ class RegPlaceParser(CssDirectoryParser):
                     "starts_at": self._normalize_datetime(date_text),
                     "city": city,
                     "venue": venue,
+                    "category": category,
                 }
             )
         )
@@ -349,6 +359,21 @@ class RegPlaceParser(CssDirectoryParser):
         )
         if match:
             return "МЕГА Белая Дача"
+        return None
+
+    def _extract_regplace_category(self, text: str | None) -> str | None:
+        if not text:
+            return None
+        category_patterns = [
+            (r"\bвеломарафон\b|\bвелогонк|\bmtb\b|\bgravel\b|\bвелокросс\b", "Велоспорт"),
+            (r"\bзабег\b|\bбег\b|\bтрейл\b|\bкросс\b|\bмарафон\b|\bполумарафон\b", "Бег"),
+            (r"\bплаван", "Плавание"),
+            (r"\bлыж", "Лыжи"),
+            (r"\bтриатлон\b|\bдуатлон\b|\bакватлон\b", "Триатлон"),
+        ]
+        for pattern, category in category_patterns:
+            if re.search(pattern, text, flags=re.IGNORECASE):
+                return category
         return None
 
 
