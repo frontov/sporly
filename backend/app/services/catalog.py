@@ -1416,6 +1416,8 @@ class CatalogService:
 
         normalized = category.strip().lower()
 
+        if any(token in normalized for token in ["триатлон", "дуатлон", "swimrun", "акватлон"]):
+            return "Триатлон"
         if any(token in normalized for token in ["вело", "велогон", "gravel", "bmx"]):
             return "Велоспорт"
         if any(
@@ -1429,8 +1431,6 @@ class CatalogService:
             return "Плавание"
         if any(token in normalized for token in ["водный спорт", "sup", "сап", "греб", "каяк", "байдар"]):
             return "Плавание"
-        if any(token in normalized for token in ["триатлон", "дуатлон", "swimrun", "акватлон"]):
-            return "Триатлон"
         if any(
             token in normalized
             for token in ["ориентирование", "туризм", "скалолаз", "альпинизм", "rogaine", "рогейн"]
