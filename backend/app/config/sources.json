@@ -112,6 +112,20 @@
       }
     },
     {
+      "name": "TRI NITI CUP",
+      "base_url": "https://cup.marzocchi.ru",
+      "listing_urls": [
+        "https://cup.marzocchi.ru/tournaments/tourns_3.html"
+      ],
+      "enabled": true,
+      "parser_type": "tri_niti_cup",
+      "selectors": {
+        "item": "p",
+        "title": "p",
+        "link": "a"
+      }
+    },
+    {
       "name": "Gran Fondo",
       "base_url": "https://www.granfondo.ru",
       "listing_urls": [
@@ -240,6 +254,20 @@
         "item": "article.post",
         "title": ".entry-title a",
         "link": ".entry-title a"
+      }
+    },
+    {
+      "name": "Velomarathon",
+      "base_url": "https://velomarathon.ru",
+      "listing_urls": [
+        "https://velomarathon.ru/#rec862409436"
+      ],
+      "enabled": true,
+      "parser_type": "velomarathon",
+      "selectors": {
+        "item": ".t778__col.js-product",
+        "title": ".t778__title",
+        "link": "a"
       }
     },
     {

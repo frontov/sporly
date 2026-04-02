@@ -1577,6 +1577,211 @@ class MarzocchiCupParser(CssDirectoryParser):
         return None
 
 
+class TriNitiCupParser(CssDirectoryParser):
+    STAGE_PATTERN = re.compile(
+        r"^(?P<stage>\d+)\s*этап(?:\s*[.\-–—]\s*|\.\s*)(?P<title>.+)$",
+        flags=re.IGNORECASE,
+    )
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        content = soup.select_one(".text-item")
+        if content is None:
+            return []
+
+        lines = [
+            self._clean_tri_niti_line(node.get_text(" ", strip=True))
+            for node in content.select("p")
+        ]
+        lines = [line for line in lines if line]
+        events: list[Event] = []
+
+        collecting = False
+        pending_stage: tuple[int, str] | None = None
+        for line in lines:
+            lowered = line.lower()
+            if "серия гонок" in lowered and "tri niti" in lowered:
+                collecting = True
+                continue
+            if not collecting:
+                continue
+            if "все перечисленные соревнования" in lowered:
+                break
+            if "не входит в общий зачет" in lowered:
+                continue
+
+            stage_match = self.STAGE_PATTERN.match(line)
+            if stage_match:
+                stage_number = int(stage_match.group("stage"))
+                stage_title = stage_match.group("title").strip(" .")
+                pending_stage = (stage_number, stage_title)
+                continue
+
+            if pending_stage is None:
+                continue
+
+            if not re.search(r"\d{1,2}\s+[а-яА-Я]+", line):
+                continue
+
+            stage_number, stage_title = pending_stage
+            pending_stage = None
+            stage_title = self._normalize_tri_niti_title(stage_title)
+            date_text, venue = self._split_tri_niti_date_and_venue(line)
+            city = self._extract_tri_niti_city(venue)
+            region = self._extract_tri_niti_region(venue)
+            stable_hash = hashlib.sha1(f"{page_url}#{stage_number}".encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"tri-niti-cup-{stage_number}-{stable_hash}",
+                    title=stage_title,
+                    description=f"{stage_number} этап TRI NITI CUP 2026",
+                    city=city,
+                    region=region,
+                    federal_district=None,
+                    venue=venue,
+                    category="Велоспорт",
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=f"{page_url}#stage-{stage_number}",
+                    image_url=None,
+                )
+            )
+
+        return events
+
+    def _clean_tri_niti_line(self, value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        return cleaned.replace("TRI NITI CUP 2025", "TRI NITI CUP 2026")
+
+    def _normalize_tri_niti_title(self, value: str) -> str:
+        cleaned = value.strip(" .")
+        if re.search(r"\b20\d{2}\b", cleaned):
+            return cleaned
+        return f"{cleaned} 2026"
+
+    def _split_tri_niti_date_and_venue(self, line: str) -> tuple[str | None, str | None]:
+        match = re.match(
+            r"(?P<date>\d{1,2}\s+[а-яА-Я]+(?:\s+\d{4})?)\.?\s*(?P<venue>.*)$",
+            line.strip(),
+        )
+        if not match:
+            return None, line.strip(" ,.")
+        date_text = match.group("date").strip(" .")
+        if not re.search(r"\d{4}", date_text):
+            date_text = f"{date_text} 2026"
+        venue = match.group("venue").strip(" ,.")
+        return date_text, venue or None
+
+    def _extract_tri_niti_city(self, venue: str | None) -> str | None:
+        if not venue:
+            return None
+        patterns = [
+            (r"\bКрасногорск\b", "Красногорск"),
+            (r"\bИстра\b", "Истра"),
+            (r"\bГоловино\b", "Головино"),
+            (r"\bФилино\b", "Филино"),
+            (r"\bПржевальское\b", "Пржевальское"),
+        ]
+        for pattern, city in patterns:
+            if re.search(pattern, venue, flags=re.IGNORECASE):
+                return city
+        return venue.split(",")[0].strip() if "," in venue else venue.strip()
+
+    def _extract_tri_niti_region(self, venue: str | None) -> str | None:
+        if not venue:
+            return None
+        lowered = venue.lower()
+        if "московская область" in lowered:
+            return "Московская область"
+        if "смоленская обл" in lowered or "смоленская область" in lowered:
+            return "Смоленская область"
+        return None
+
+
+class VelomarathonParser(CssDirectoryParser):
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        section = soup.select_one("#rec862409436")
+        if section is None:
+            return []
+
+        events: list[Event] = []
+        base_page_url = page_url.split("#", 1)[0]
+        for index, card in enumerate(section.select(".t778__col.js-product")):
+            href = self._extract_optional_attr(card, "a.js-product-link, a[href]", "href")
+            if href and "reg.place/events/" in href:
+                continue
+
+            title = self._extract_optional_text(card, ".t778__title")
+            details_node = card.select_one(".t778__descr")
+            image_url = self._extract_optional_attr(card, ".t778__bgimg", "data-original")
+            if not title or details_node is None:
+                continue
+
+            details = details_node.get_text("\n", strip=True)
+            lines = [line.strip() for line in details.split("\n") if line.strip()]
+            if not lines:
+                continue
+            date_text = lines[0]
+            venue = lines[1] if len(lines) > 1 else None
+            if not re.search(r"2026", date_text):
+                continue
+
+            synthetic_url = f"{base_page_url}#event-{index + 1}"
+            full_image = urljoin(page_url, image_url) if image_url else None
+            stable_hash = hashlib.sha1(synthetic_url.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"velomarathon-{index}-{stable_hash}",
+                    title=self._normalize_velomarathon_title(title),
+                    description=None,
+                    city=self._extract_velomarathon_city(venue),
+                    region=self._extract_velomarathon_region(venue),
+                    federal_district=None,
+                    venue=venue,
+                    category="Велоспорт",
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=synthetic_url,
+                    image_url=full_image,
+                )
+            )
+
+        return events
+
+    def _normalize_velomarathon_title(self, title: str) -> str:
+        normalized = re.sub(r"\s+", " ", title.replace("–", " — ")).strip()
+        return normalized
+
+    def _extract_velomarathon_city(self, venue: str | None) -> str | None:
+        if not venue:
+            return None
+        patterns = [
+            (r"\bДоброград\b", "Доброград"),
+            (r"\bБелопесоцкий\b", "Белопесоцкий"),
+            (r"\bИльинское\b", "Ильинское"),
+            (r"\bГАБО\b", "Габо"),
+        ]
+        for pattern, city in patterns:
+            if re.search(pattern, venue, flags=re.IGNORECASE):
+                return city
+        return venue.split(",")[0].strip()
+
+    def _extract_velomarathon_region(self, venue: str | None) -> str | None:
+        if not venue:
+            return None
+        lowered = venue.lower()
+        if "доброград" in lowered:
+            return "Владимирская область"
+        if "белопесоцкий" in lowered or "ильинское" in lowered or "габо" in lowered:
+            return "Московская область"
+        return None
+
+
 class GranFondoParser(CssDirectoryParser):
     def parse(self, html: str, page_url: str) -> list[Event]:
         soup = BeautifulSoup(html, "html.parser")

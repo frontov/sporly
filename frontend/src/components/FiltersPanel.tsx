@@ -7,6 +7,7 @@ type FiltersPanelProps = {
   cities: string[];
   popularCities: string[];
   totalEvents: number;
+  closeSignal: number;
   onChange: (next: FiltersState) => void;
   onReset: () => void;
 };
@@ -16,6 +17,7 @@ export const FiltersPanel = ({
   cities,
   popularCities,
   totalEvents,
+  closeSignal,
   onChange,
   onReset
 }: FiltersPanelProps) => {
@@ -61,6 +63,10 @@ export const FiltersPanel = ({
       document.body.style.overflow = "";
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    setIsOpen(false);
+  }, [closeSignal]);
 
   const updateField =
     (field: keyof FiltersState) =>

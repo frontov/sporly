@@ -99,6 +99,7 @@ const loadSavedFilters = (): FiltersState => {
 function App() {
   const [filters, setFilters] = useState<FiltersState>(loadSavedFilters);
   const [page, setPage] = useState(1);
+  const [filtersCloseSignal, setFiltersCloseSignal] = useState(0);
   const { data, loading, error } = useEvents(filters, page);
   const availableRegions = data.available_cities
     .filter(isPureRegionOption)
@@ -117,6 +118,12 @@ function App() {
     setPage(1);
   }, [filters]);
 
+  const navigateToPage = (nextPage: number) => {
+    setPage(nextPage);
+    setFiltersCloseSignal((current) => current + 1);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
     <div className="page-shell">
       <header className="hero">
@@ -131,6 +138,7 @@ function App() {
         cities={availableRegions}
         popularCities={popularRegions}
         totalEvents={data.total}
+        closeSignal={filtersCloseSignal}
         onChange={(next) => setFilters(next)}
         onReset={() => {
           setFilters(initialFilters);
@@ -144,15 +152,35 @@ function App() {
         </div>
       ) : null}
 
-      {error ? <div className="state-banner state-banner--error">{error}</div> : null}
-      {loading ? <div className="state-banner">Загружаю каталог...</div> : null}
+      {error ? (
+        <section className="empty-state empty-state--error">
+          <h2>Серверы и админы укатили в закат</h2>
+          <p>Попробуйте зайти чуть позже или покатайтесь.</p>
+        </section>
+      ) : null}
+      {loading ? (
+        <section className="loading-state" aria-live="polite" aria-busy="true">
+          <div className="loading-state__mark">
+            <img src="/logo-mark.svg" alt="" aria-hidden="true" />
+          </div>
+          <div className="loading-state__copy">
+            <h2>Ищем спортивные события</h2>
+            <p>Подгружаю свежие старты из всех источников</p>
+          </div>
+          <div className="loading-state__tracks" aria-hidden="true">
+            <span className="loading-state__track loading-state__track--wide" />
+            <span className="loading-state__track loading-state__track--mid" />
+            <span className="loading-state__track loading-state__track--narrow" />
+          </div>
+        </section>
+      ) : null}
 
       {!loading && !error && data.items.length === 0 ? (
         <section className="empty-state">
-          <h2>Такие мероприятия еще никто не решился провести</h2>
+          <h2>Пока ничего не нашлось</h2>
           <p>
-            По текущим фильтрам событий не нашлось. Попробуйте расширить даты, убрать часть
-            ограничений или выбрать другой город и вид спорта.
+            Попробуйте изменить даты, убрать часть ограничений или выбрать другой
+            регион и вид спорта.
           </p>
         </section>
       ) : null}
@@ -165,7 +193,11 @@ function App() {
 
       {!loading && !error && data.total_pages > 1 ? (
         <nav className="pagination" aria-label="Пагинация событий">
-          <button type="button" onClick={() => setPage((current) => Math.max(current - 1, 1))} disabled={data.page <= 1}>
+          <button
+            type="button"
+            onClick={() => navigateToPage(Math.max(page - 1, 1))}
+            disabled={data.page <= 1}
+          >
             Назад
           </button>
           <span>
@@ -173,7 +205,7 @@ function App() {
           </span>
           <button
             type="button"
-            onClick={() => setPage((current) => Math.min(current + 1, data.total_pages))}
+            onClick={() => navigateToPage(Math.min(page + 1, data.total_pages))}
             disabled={data.page >= data.total_pages}
           >
             Вперёд

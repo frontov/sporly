@@ -30,6 +30,8 @@ from app.parsers.base import (
     RussiaRunningSeriesParser,
     RuncParser,
     RussialoppetParser,
+    TriNitiCupParser,
+    VelomarathonParser,
     SourceConfig,
     SourceFieldMap,
     VelogearanceParser,
@@ -57,9 +59,11 @@ class CatalogService:
         "REGPLACE": 5,
         "Russia Running": 5,
         "IRONSTAR": 5,
+        "TRI NITI CUP": 5,
         "Orgeo": 4,
         "Golden Ultra": 4,
         "Velogearance": 4,
+        "Velomarathon": 4,
         "XCnews": 4,
         "ARF": 4,
     }
@@ -829,10 +833,14 @@ class CatalogService:
             return ArtaSportParser(source_config)
         if source_config.parser_type == "marzocchi_cup":
             return MarzocchiCupParser(source_config)
+        if source_config.parser_type == "tri_niti_cup":
+            return TriNitiCupParser(source_config)
         if source_config.parser_type == "granfondo":
             return GranFondoParser(source_config)
         if source_config.parser_type == "cyclingrace":
             return CyclingRaceParser(source_config)
+        if source_config.parser_type == "velomarathon":
+            return VelomarathonParser(source_config)
         if source_config.parser_type == "otime_calendar":
             return OTimeCalendarParser(source_config)
         if source_config.parser_type == "marathoncup":
@@ -947,6 +955,11 @@ class CatalogService:
         normalized_title = self._normalize_title_for_dedupe(event.title)
         normalized_date = (event.starts_at or self._parse_date_text(event.date_text) or "")[:10]
         normalized_location = self._normalize_location_name(event.region) or self._normalize_location_name(event.city)
+        tri_niti_stage = self._extract_tri_niti_stage_marker(event)
+        if tri_niti_stage:
+            if not normalized_date:
+                return None
+            return (tri_niti_stage, normalized_date, "tri-niti-cup")
         if not normalized_title or not normalized_date or not normalized_location:
             return None
         return (normalized_title, normalized_date, normalized_location.casefold())
@@ -956,8 +969,34 @@ class CatalogService:
             return ""
         normalized = title.casefold().replace("ё", "е")
         normalized = re.sub(r"[\"'`«»„“”()]+", " ", normalized)
+        normalized = re.sub(
+            r"^\d+\s*[-йя]?\s*этап\s+tri\s*niti\s+cup\s*[-—–:]\s*",
+            "",
+            normalized,
+        )
+        normalized = re.sub(
+            r"\s+\d+\s*[-йя]?\s*этап\s+tri\s*niti\s+cup(?:\s+\d{4})?$",
+            "",
+            normalized,
+        )
+        normalized = re.sub(
+            r"^\d+\s*[-йя]?\s*этап\s+",
+            "",
+            normalized,
+        )
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return normalized
+
+    def _extract_tri_niti_stage_marker(self, event: Event) -> str | None:
+        haystack = " ".join(
+            part for part in [event.title, event.description, event.venue] if part
+        ).casefold().replace("ё", "е")
+        if "tri niti cup" not in haystack:
+            return None
+        match = re.search(r"(\d+)\s*[-йя]?\s*этап", haystack)
+        if not match:
+            return None
+        return f"tri niti cup stage {match.group(1)}"
 
     def _should_replace_duplicate(self, existing: Event, candidate: Event) -> bool:
         existing_score = self._event_completeness_score(existing)
@@ -979,12 +1018,22 @@ class CatalogService:
         if not normalized:
             return ""
 
+        preserve_fragment = ""
+        fragment_match = re.search(r"#(stage-\d+|event-\d+)$", normalized)
+        if fragment_match:
+            preserve_fragment = f"#{fragment_match.group(1).lower()}"
+
         normalized = re.sub(r"#.*$", "", normalized)
-        normalized = re.sub(r"\?.*$", "", normalized)
         normalized = normalized.rstrip("/")
         parsed = urlparse(normalized)
         host = parsed.netloc.lower()
         path = parsed.path.rstrip("/")
+        query = ""
+
+        if host == "nezhesteam.ru" and path == "/race":
+            date_match = re.search(r"(?:^|[?&])date=(\d{8})(?:&|$)", source_url)
+            if date_match:
+                query = f"date={date_match.group(1)}"
 
         if host == "iron-star.com" and path.startswith("/en/"):
             path = path[3:]
@@ -995,11 +1044,11 @@ class CatalogService:
                 host,
                 path.lower(),
                 "",
-                "",
+                query,
                 "",
             )
         )
-        return normalized
+        return f"{normalized}{preserve_fragment}"
 
     def _event_completeness_score(self, event: Event) -> int:
         return sum(
