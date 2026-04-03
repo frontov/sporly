@@ -5,6 +5,8 @@ class Event(BaseModel):
     id: str
     title: str
     description: str | None = None
+    series_slug: str | None = None
+    series_name: str | None = None
     city: str | None = None
     region: str | None = None
     federal_district: str | None = None

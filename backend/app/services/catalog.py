@@ -75,6 +75,13 @@ class CatalogService:
         "XCnews": 4,
         "ARF": 4,
     }
+    SERIES_DEFINITIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+        ("mvm", "МВМ", ("серия мвм 2026", " мвм", "velomarathon", "московорецкий гребной марафон")),
+        ("tri_niti", "TRI NITI", ("tri niti", "tri_niti", "triniti", "tri nity", "tri niti cup")),
+        ("open_band", "OPEN BAND", ("open band", "openband.run", "openband")),
+        ("russialoppet", "RUSSIALOPPET", ("russialoppet", "руссиалоппет", "серия лыжных марафонов")),
+        ("running_community", "RUNC", ("running community", "runc.run", "московский марафон", "беговое сообщество")),
+    )
     REGION_ALIASES: dict[str, tuple[str, ...]] = {
         "Москва": (
             "москва",
@@ -1176,14 +1183,33 @@ class CatalogService:
 
     def _normalize_event(self, event: Event) -> Event:
         normalized_region = self._infer_region(event.city, event.region, event.venue, event.title)
+        series_slug, series_name = self._detect_series(event)
         return event.model_copy(
             update={
                 "region": normalized_region,
                 "city": self._normalize_city(event.city, normalized_region),
                 "category": self._normalize_category(event.category),
                 "starts_at": self._normalize_starts_at(event.date_text, event.starts_at),
+                "series_slug": series_slug,
+                "series_name": series_name,
             }
         )
+
+    def _detect_series(self, event: Event) -> tuple[str | None, str | None]:
+        haystack = " ".join(
+            part
+            for part in [
+                event.title,
+                event.description,
+                str(event.source_url),
+                event.source_name,
+            ]
+            if part
+        ).casefold()
+        for slug, name, markers in self.SERIES_DEFINITIONS:
+            if any(marker in haystack for marker in markers):
+                return slug, name
+        return None, None
 
     def build_available_cities(self, events: list[Event]) -> list[str]:
         major_cities = {

@@ -2,6 +2,8 @@ export type EventItem = {
   id: string;
   title: string;
   description: string | null;
+  series_slug: string | null;
+  series_name: string | null;
   city: string | null;
   venue: string | null;
   category: string | null;
