@@ -180,23 +180,31 @@ export const FiltersPanel = ({
             </label>
           </div>
 
+          <div className="filters__quick-toggle-row">
+            <button
+              type="button"
+              className={`filters__quick-toggle${filters.recommended ? " filters__quick-toggle--active" : ""}`}
+              aria-pressed={filters.recommended}
+              onClick={() =>
+                onChange({
+                  ...filters,
+                  recommended: !filters.recommended
+                })
+              }
+            >
+              <span className="filters__quick-toggle-copy">
+                <span className="filters__quick-toggle-label">Рекомендуемые</span>
+                <span className="filters__quick-toggle-hint">только отмеченные события</span>
+              </span>
+              <span className="filters__quick-toggle-switch" aria-hidden="true">
+                <span className="filters__quick-toggle-knob" />
+              </span>
+            </button>
+          </div>
+
           <div className="filters__cluster">
             <span className="filters__subhead">Вид спорта</span>
             <div className="category-chips">
-              <button
-                type="button"
-                className={`category-chip category-chip--recommended${
-                  filters.recommended ? " category-chip--active" : ""
-                }`}
-                onClick={() =>
-                  onChange({
-                    ...filters,
-                    recommended: !filters.recommended
-                  })
-                }
-              >
-                Рекомендуемые
-              </button>
               {SPORT_OPTIONS.map((option) => (
                 <button
                   key={option}
