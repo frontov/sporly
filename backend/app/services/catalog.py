@@ -54,6 +54,7 @@ class EventFilters:
     query: str | None = None
     cities: list[str] | None = None
     categories: list[str] | None = None
+    recommended: bool = False
     source: str | None = None
     date_from: str | None = None
     date_to: str | None = None
@@ -1534,6 +1535,13 @@ class CatalogService:
                 event
                 for event in filtered
                 if (event.category or "").lower() in selected_categories
+            ]
+
+        if filters.recommended:
+            filtered = [
+                event
+                for event in filtered
+                if event.series_slug is not None
             ]
 
         if filters.source:

@@ -956,6 +956,12 @@ a {
   color: var(--accent-soft);
 }
 
+.category-chip--recommended {
+  color: #20584b;
+  border-color: rgba(44, 119, 97, 0.1);
+  background: rgba(238, 249, 245, 0.92);
+}
+
 .event-card__category--бег,
 .category-chip--бег {
   color: #8a442b;

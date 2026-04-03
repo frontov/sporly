@@ -31,6 +31,7 @@ export const FiltersPanel = ({
   const activeFilterLabels = [
     normalizedCategories.length ? normalizedCategories.join(", ") : "",
     filters.cities.length ? filters.cities.join(", ") : "",
+    filters.recommended ? "Рекомендуемые" : "",
     filters.q ? `Поиск: ${filters.q}` : "",
     filters.dateFrom ? `От ${filters.dateFrom}` : "",
     filters.dateTo ? `До ${filters.dateTo}` : "",
@@ -182,6 +183,20 @@ export const FiltersPanel = ({
           <div className="filters__cluster">
             <span className="filters__subhead">Вид спорта</span>
             <div className="category-chips">
+              <button
+                type="button"
+                className={`category-chip category-chip--recommended${
+                  filters.recommended ? " category-chip--active" : ""
+                }`}
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    recommended: !filters.recommended
+                  })
+                }
+              >
+                Рекомендуемые
+              </button>
               {SPORT_OPTIONS.map((option) => (
                 <button
                   key={option}

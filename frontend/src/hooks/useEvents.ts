@@ -10,6 +10,7 @@ const buildQuery = (filters: FiltersState, page: number) => {
   if (filters.q) params.set("q", filters.q);
   filters.cities.forEach((city) => params.append("city", city));
   filters.categories.forEach((category) => params.append("category", category));
+  if (filters.recommended) params.set("recommended", "true");
   if (effectiveDateFrom) params.set("date_from", effectiveDateFrom);
   if (filters.dateTo) params.set("date_to", filters.dateTo);
   params.set("sort_by", filters.sortBy);

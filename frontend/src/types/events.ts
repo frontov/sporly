@@ -32,6 +32,7 @@ export type FiltersState = {
   q: string;
   cities: string[];
   categories: string[];
+  recommended: boolean;
   dateFrom: string;
   dateTo: string;
   sortBy: "date_asc" | "date_desc";

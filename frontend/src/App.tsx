@@ -9,6 +9,7 @@ const initialFilters: FiltersState = {
   q: "",
   cities: [],
   categories: [],
+  recommended: false,
   dateFrom: "",
   dateTo: "",
   sortBy: "date_asc",
@@ -84,6 +85,7 @@ const loadSavedFilters = (): FiltersState => {
       dateTo: typeof parsed.dateTo === "string" ? parsed.dateTo : "",
       sortBy: parsed.sortBy === "date_desc" ? "date_desc" : "date_asc",
       includePast: Boolean(parsed.includePast),
+      recommended: Boolean(parsed.recommended),
       cities: Array.isArray(parsed.cities) ? parsed.cities : legacyCity ? [legacyCity] : [],
       categories: Array.isArray(parsed.categories)
         ? parsed.categories.map((category) => normalizeCategoryLabel(category) ?? category)
