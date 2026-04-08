@@ -42,6 +42,143 @@
     />
     <meta property="og:image:alt" content="Sporly — поиск спортивных событий" />
     <meta name="twitter:image" content="https://sporly.ru/og-image.svg" />
+    <style>
+      body {
+        margin: 0;
+      }
+
+      .seo-shell {
+        padding: 32px 20px 48px;
+        color: #13211c;
+        background:
+          radial-gradient(circle at top, rgba(188, 255, 137, 0.2), transparent 38%),
+          linear-gradient(180deg, #fafbf7 0%, #f6f8f3 100%);
+        font-family:
+          "Inter",
+          "Segoe UI",
+          -apple-system,
+          BlinkMacSystemFont,
+          sans-serif;
+      }
+
+      .seo-shell__inner {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+
+      .seo-shell__brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #4d6457;
+      }
+
+      .seo-shell__brand img {
+        width: 28px;
+        height: 28px;
+      }
+
+      .seo-shell h1,
+      .seo-shell h2 {
+        margin: 0;
+      }
+
+      .seo-shell h1 {
+        max-width: 760px;
+        font-size: clamp(2rem, 5vw, 3.75rem);
+        line-height: 0.96;
+        letter-spacing: -0.04em;
+      }
+
+      .seo-shell__lead {
+        max-width: 760px;
+        margin: 20px 0 0;
+        font-size: clamp(1rem, 2vw, 1.2rem);
+        line-height: 1.65;
+        color: #5b6f63;
+      }
+
+      .seo-shell__grid {
+        display: grid;
+        gap: 18px;
+        margin-top: 32px;
+      }
+
+      .seo-shell__card {
+        padding: 22px;
+        border: 1px solid rgba(19, 33, 28, 0.08);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 18px 40px rgba(19, 33, 28, 0.05);
+      }
+
+      .seo-shell__card h2 {
+        font-size: 1.05rem;
+        line-height: 1.2;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #4d6457;
+      }
+
+      .seo-shell__card p {
+        margin: 14px 0 0;
+        font-size: 1rem;
+        line-height: 1.7;
+        color: #5b6f63;
+      }
+
+      .seo-shell__list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 16px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .seo-shell__list a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 42px;
+        padding: 0 16px;
+        border: 1px solid rgba(19, 33, 28, 0.08);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        color: #234034;
+        font-size: 0.96rem;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .seo-shell__text-block {
+        margin-top: 18px;
+      }
+
+      .seo-shell__text-block p {
+        margin: 12px 0 0;
+      }
+
+      .seo-shell__note {
+        margin-top: 20px;
+        font-size: 0.94rem;
+        color: #708275;
+      }
+
+      .js .seo-shell {
+        display: none;
+      }
+
+      @media (min-width: 860px) {
+        .seo-shell__grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    </style>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -70,6 +207,9 @@
         ]
       }
     </script>
+    <script>
+      document.documentElement.classList.add("js");
+    </script>
     <script type="text/javascript">
       (function(m,e,t,r,i,k,a){
         m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
@@ -91,6 +231,73 @@
     </script>
   </head>
   <body>
+    <main class="seo-shell" aria-label="Описание сервиса Sporly">
+      <div class="seo-shell__inner">
+        <div class="seo-shell__brand">
+          <img src="/logo-mark.svg" alt="Sporly" />
+          <span>Sporly</span>
+        </div>
+        <h1>Календарь спортивных событий по регионам, видам спорта и датам</h1>
+        <p class="seo-shell__lead">
+          Sporly помогает находить спортивные мероприятия в России и ближнем зарубежье:
+          забеги, велогонки, лыжные марафоны, триатлон, плавание, ориентирование и
+          другие старты в одном каталоге. Мы собираем события из разных источников,
+          приводим их к единому виду и помогаем быстрее выбрать подходящий старт.
+        </p>
+
+        <div class="seo-shell__grid">
+          <section class="seo-shell__card" aria-labelledby="seo-sports">
+            <h2 id="seo-sports">Популярные виды спорта</h2>
+            <p>
+              На сайте можно искать старты по категориям, регионам и ближайшим датам.
+              Ниже — прямые подборки по самым востребованным видам спорта.
+            </p>
+            <ul class="seo-shell__list">
+              <li><a href="/seo/sport/beg">Бег</a></li>
+              <li><a href="/seo/sport/velosport">Велоспорт</a></li>
+              <li><a href="/seo/sport/triatlon">Триатлон</a></li>
+              <li><a href="/seo/sport/plavanie">Плавание</a></li>
+              <li><a href="/seo/sport/lyzhi">Лыжи</a></li>
+              <li><a href="/seo/sport/orientirovanie-i-turizm">Ориентирование и туризм</a></li>
+            </ul>
+          </section>
+
+          <section class="seo-shell__card" aria-labelledby="seo-regions">
+            <h2 id="seo-regions">Популярные регионы</h2>
+            <p>
+              Отдельные подборки помогают быстрее смотреть календарь по крупным
+              спортивным регионам и не собирать фильтры вручную.
+            </p>
+            <ul class="seo-shell__list">
+              <li><a href="/seo/region/moskovskaya-oblast">Московская область</a></li>
+              <li><a href="/seo/region/moskva">Москва</a></li>
+              <li><a href="/seo/region/sankt-peterburg">Санкт-Петербург</a></li>
+              <li><a href="/seo/region/leningradskaya-oblast">Ленинградская область</a></li>
+              <li><a href="/seo/region/krasnodarskiy-kray">Краснодарский край</a></li>
+              <li><a href="/seo/region/respublika-tatarstan">Татарстан</a></li>
+            </ul>
+          </section>
+        </div>
+
+        <section class="seo-shell__card seo-shell__text-block" aria-labelledby="seo-how">
+          <h2 id="seo-how">Как устроен каталог</h2>
+          <p>
+            В карточках событий мы показываем дату, регион, официальный или доверенный
+            источник, а для части стартов — дистанции, статус регистрации и другие
+            важные детали. Это помогает не только увидеть мероприятие, но и быстрее
+            понять, подходит ли оно для участия.
+          </p>
+          <p>
+            Дополнительно на сайте доступны подборки по регионам и видам спорта,
+            поэтому Sporly можно использовать как единый календарь стартов для бега,
+            велоспорта, триатлона, плавания, лыж и ориентирования.
+          </p>
+          <p class="seo-shell__note">
+            Для полной интерактивной версии каталога включите JavaScript в браузере.
+          </p>
+        </section>
+      </div>
+    </main>
     <div id="root"></div>
     <noscript><div><img src="https://mc.yandex.ru/watch/108342984" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
     <script type="module" src="/src/main.tsx"></script>
