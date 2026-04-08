@@ -158,6 +158,51 @@ class CssDirectoryParser:
         except (ValueError, OverflowError, TypeError):
             return None
 
+    def _extract_distance_summary_from_text(self, text: str | None) -> str | None:
+        if not text:
+            return None
+
+        normalized = re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+        if not normalized:
+            return None
+
+        distances: list[str] = []
+
+        group_match = re.search(
+            r"(\d+(?:[.,]\d+)?(?:\s*(?:/|и|-|•|;|,\s+)\s*\d+(?:[.,]\d+)?)+)\s*(км|km)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if group_match:
+            for value in re.findall(r"\d+(?:[.,]\d+)?", group_match.group(1)):
+                value = self._normalize_distance_value(value)
+                if value:
+                    label = f"{value} км"
+                    if label not in distances:
+                        distances.append(label)
+
+        for value, _unit in re.findall(r"(\d+(?:[.,]\d+)?)\s*(км|km)\b", normalized, flags=re.IGNORECASE):
+            label = f"{self._normalize_distance_value(value)} км"
+            if label not in distances:
+                distances.append(label)
+
+        for value, _unit in re.findall(r"(\d{3,5})\s*(м)\b", normalized, flags=re.IGNORECASE):
+            meters = int(value)
+            if meters >= 200 and meters <= 10000:
+                label = f"{meters} м"
+                if label not in distances:
+                    distances.append(label)
+
+        if not distances:
+            return None
+        return " • ".join(distances)
+
+    def _normalize_distance_value(self, value: str) -> str:
+        cleaned = value.strip().replace(",", ".")
+        if cleaned.endswith(".0"):
+            cleaned = cleaned[:-2]
+        return cleaned
+
     def _parse_russian_date(self, raw_value: str) -> str | None:
         months = {
             "января": 1,
@@ -338,6 +383,18 @@ class RegPlaceParser(CssDirectoryParser):
         city = self._extract_regplace_city(location_text, title)
         venue = venue or self._extract_regplace_venue(location_text)
         category = self._extract_regplace_category(location_text or description_text or title)
+        organizer_name = self._extract_regplace_organizer(soup)
+        registration_status, registration_deadline = self._extract_regplace_registration_details(soup)
+        price_from = self._extract_regplace_price(soup)
+        distance_summary = self._extract_regplace_distance_summary(
+            soup,
+            title,
+            lead_text,
+            description_text,
+            description_meta_text,
+            keywords_text,
+            page_location_text,
+        )
         full_image = urljoin(page_url, image_url) if image_url else None
         stable_hash = hashlib.sha1(page_url.encode("utf-8")).hexdigest()[:12]
 
@@ -357,6 +414,11 @@ class RegPlaceParser(CssDirectoryParser):
                 category=category,
                 date_text=date_text,
                 starts_at=self._normalize_datetime(date_text),
+                organizer_name=organizer_name,
+                registration_status=registration_status,
+                registration_deadline=registration_deadline,
+                price_from=price_from,
+                distance_summary=distance_summary,
                 source_name=self.config.name,
                 source_url=page_url,
                 image_url=full_image,
@@ -392,7 +454,13 @@ class RegPlaceParser(CssDirectoryParser):
         client: httpx.AsyncClient,
         semaphore: asyncio.Semaphore,
     ) -> Event:
-        if event.date_text and event.city:
+        if (
+            event.date_text
+            and event.city
+            and event.organizer_name
+            and event.registration_status
+            and event.price_from
+        ):
             return event
 
         async with semaphore:
@@ -426,6 +494,17 @@ class RegPlaceParser(CssDirectoryParser):
         city = event.city or self._extract_regplace_city(location_text, event.title)
         venue = event.venue or page_venue or self._extract_regplace_venue(location_text)
         category = event.category or self._extract_regplace_category(location_text)
+        organizer_name = event.organizer_name or self._extract_regplace_organizer(soup)
+        registration_status, registration_deadline = self._extract_regplace_registration_details(soup)
+        price_from = self._extract_regplace_price(soup)
+        distance_summary = self._extract_regplace_distance_summary(
+            soup,
+            event.title,
+            lead_text,
+            description_text,
+            keywords_text,
+            page_location_text,
+        )
 
         return self._enrich_regplace_from_title(
             event.model_copy(
@@ -435,6 +514,11 @@ class RegPlaceParser(CssDirectoryParser):
                     "city": city,
                     "venue": venue,
                     "category": category,
+                    "organizer_name": organizer_name,
+                    "registration_status": registration_status or event.registration_status,
+                    "registration_deadline": registration_deadline or event.registration_deadline,
+                    "price_from": price_from or event.price_from,
+                    "distance_summary": distance_summary or event.distance_summary,
                     "description": self._merge_regplace_description(
                         event.description, str(event.source_url), event.title
                     ),
@@ -527,6 +611,80 @@ class RegPlaceParser(CssDirectoryParser):
         if match:
             return "МЕГА Белая Дача"
         return None
+
+    def _extract_regplace_organizer(self, soup: BeautifulSoup) -> str | None:
+        title = self._extract_optional_text(soup, ".organizer-card .card-title")
+        return title or None
+
+    def _extract_regplace_registration_details(
+        self,
+        soup: BeautifulSoup,
+    ) -> tuple[str | None, str | None]:
+        cta = self._extract_optional_text(soup, ".btn-cta")
+        deadline_text = self._extract_optional_text(soup, ".links .small.text-center")
+        status = None
+        if cta:
+            normalized = cta.casefold()
+            if "закрыт" in normalized:
+                status = "closed"
+            elif "зарегистр" in normalized:
+                status = "open"
+
+        deadline = None
+        if deadline_text:
+            normalized_deadline = re.sub(r"\s+", " ", deadline_text).strip()
+            deadline = (
+                normalized_deadline
+                if normalized_deadline.casefold().startswith("до ")
+                else f"до {normalized_deadline}"
+            )
+        return status, deadline
+
+    def _extract_regplace_price(self, soup: BeautifulSoup) -> str | None:
+        values: list[int] = []
+        for cta in soup.select(".race-card__actions .btn-cta"):
+            text = cta.get_text(" ", strip=True)
+            if "бесплатн" in text.casefold():
+                return "от 0 ₽"
+            match = re.search(r"(\d[\d\s]{2,6})\s*₽", text)
+            if not match:
+                continue
+            try:
+                values.append(int(re.sub(r"\s+", "", match.group(1))))
+            except ValueError:
+                continue
+        if not values:
+            return None
+        return f"от {min(values)} ₽"
+
+    def _extract_regplace_distance_summary(
+        self,
+        soup: BeautifulSoup,
+        *texts: str | None,
+    ) -> str | None:
+        values: list[str] = []
+        seen: set[str] = set()
+
+        for node in soup.select(".race-card__title, .race-card__limits, .race-card__meta-item"):
+            text = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip(" ,.")
+            if not text:
+                continue
+            normalized = self._extract_distance_summary_from_text(text)
+            candidate = normalized
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            values.append(candidate)
+
+        if values:
+            return " • ".join(values)
+
+        race_card_text = " ".join(
+            node.get_text(" ", strip=True)
+            for node in soup.select(".race-card, .card-race, [class*='race-card']")
+        )
+        combined = " ".join(part for part in [*texts, race_card_text] if part)
+        return self._extract_distance_summary_from_text(combined)
 
     def _extract_regplace_category(self, text: str | None) -> str | None:
         if not text:
@@ -684,7 +842,13 @@ class OrgeoParser(CssDirectoryParser):
         client: httpx.AsyncClient,
         semaphore: asyncio.Semaphore,
     ) -> Event:
-        if event.starts_at and event.city:
+        if (
+            event.starts_at
+            and event.city
+            and event.organizer_name
+            and event.registration_status
+            and event.price_from
+        ):
             return event
 
         async with semaphore:
@@ -700,6 +864,10 @@ class OrgeoParser(CssDirectoryParser):
         )
         date_text = event.date_text or self._extract_orgeo_detail_date(soup)
         region, city, venue = self._extract_orgeo_detail_location(soup)
+        organizer_name = self._extract_orgeo_organizer(soup)
+        registration_status, registration_deadline = self._extract_orgeo_registration_details(soup)
+        price_from = self._extract_orgeo_price(soup)
+        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
 
         return event.model_copy(
             update={
@@ -708,6 +876,11 @@ class OrgeoParser(CssDirectoryParser):
                 "region": region or event.region,
                 "city": city or event.city,
                 "venue": venue or event.venue,
+                "organizer_name": organizer_name or event.organizer_name,
+                "registration_status": registration_status or event.registration_status,
+                "registration_deadline": registration_deadline or event.registration_deadline,
+                "price_from": price_from or event.price_from,
+                "distance_summary": distance_summary or event.distance_summary,
             }
         )
 
@@ -812,6 +985,64 @@ class OrgeoParser(CssDirectoryParser):
                 return match.group(1).strip(" ,")
         return None
 
+    def _extract_orgeo_organizer(self, soup: BeautifulSoup) -> str | None:
+        organizer = self._extract_optional_attr(soup, '[itemprop="organizer"] [itemprop="name"]', "content")
+        if organizer:
+            return organizer
+        creator_heading = soup.find("h4", string=re.compile("Событие создал", re.IGNORECASE))
+        if creator_heading:
+            link = creator_heading.find_next("a")
+            if link:
+                text = link.get_text(" ", strip=True)
+                if text:
+                    return text
+        return None
+
+    def _extract_orgeo_registration_details(
+        self,
+        soup: BeautifulSoup,
+    ) -> tuple[str | None, str | None]:
+        text = soup.get_text(" ", strip=True)
+        label_text = None
+        label = soup.select_one(".label.label-default")
+        if label is not None:
+            label_text = label.get_text(" ", strip=True)
+
+        haystack = " ".join(part for part in [label_text, text] if part).casefold()
+        status = None
+        if "регистрация закрыта" in haystack:
+            status = "closed"
+        elif "лист ожидания" in haystack:
+            status = "limited"
+        elif "регистрация" in haystack and "закрыта" not in haystack:
+            status = "open"
+
+        deadline = None
+        deadline_match = re.search(
+            r"(?:заявки принимаются до|регистрация закрыта)\s+(\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{2}:\d{2})?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if deadline_match:
+            deadline = f"до {deadline_match.group(1)}"
+
+        return status, deadline
+
+    def _extract_orgeo_price(self, soup: BeautifulSoup) -> str | None:
+        values: list[int] = []
+        for cell in soup.select("table.table_dist_price td.text-center"):
+            text = cell.get_text(" ", strip=True)
+            match = re.search(r"(\d[\d\s]{2,6})\s*₽", text)
+            if not match:
+                continue
+            try:
+                values.append(int(re.sub(r"\s+", "", match.group(1))))
+            except ValueError:
+                continue
+        if not values:
+            return None
+        return f"от {min(values)} ₽"
+
 
 class RuncParser(CssDirectoryParser):
     def parse(self, html: str, page_url: str) -> list[Event]:
@@ -851,6 +1082,7 @@ class RuncParser(CssDirectoryParser):
                     id=f"runc-{index}-{stable_hash}",
                     title=title,
                     description=None,
+                    distance_summary=self._extract_distance_summary_from_text(title),
                     city=city,
                     region=None,
                     federal_district=None,
@@ -889,6 +1121,7 @@ class RuncParser(CssDirectoryParser):
             location_text = location_block.get_text(" ", strip=True) if location_block else None
             city = event.city or self._extract_runc_city(location_text, event.title, str(event.source_url))
             venue = event.venue or self._extract_runc_venue(location_text)
+            distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
 
             enriched.append(
                 self._apply_runc_title_hints(
@@ -898,6 +1131,7 @@ class RuncParser(CssDirectoryParser):
                             "starts_at": self._normalize_datetime(date_text),
                             "city": city,
                             "venue": venue,
+                            "distance_summary": distance_summary or event.distance_summary,
                         }
                     )
                 )
@@ -971,6 +1205,9 @@ class RussialoppetParser(CssDirectoryParser):
                     id=f"russialoppet-{index}-{stable_hash}",
                     title=title,
                     description=description or "Лыжный марафон Russialoppet",
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, description) if part)
+                    ),
                     city=city,
                     region=region,
                     federal_district=federal_district,
@@ -1016,6 +1253,10 @@ class RussialoppetParser(CssDirectoryParser):
                         "date_text": date_text or event.date_text,
                         "starts_at": self._normalize_datetime(date_text),
                         "city": event.city or self._extract_russialoppet_city(soup),
+                        "distance_summary": self._extract_distance_summary_from_text(
+                            soup.get_text(" ", strip=True)
+                        )
+                        or event.distance_summary,
                     }
                 )
             )
@@ -1154,6 +1395,7 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
                     id=f"russiarunning-{index}-{stable_hash}",
                     title=title,
                     description="Источник получен со страницы серий RussiaRunning; дата и город могут потребовать дополнительного парсинга карточки события.",
+                    distance_summary=self._extract_distance_summary_from_text(title),
                     city=inferred_city,
                     region=None,
                     federal_district=None,
@@ -1200,9 +1442,11 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
             )
 
         async with semaphore:
-            fetched_date, fetched_city, fetched_venue = await self._fetch_russiarunning_details(
-                str(event.source_url),
-                client,
+            fetched_date, fetched_city, fetched_venue, fetched_distance_summary = (
+                await self._fetch_russiarunning_details(
+                    str(event.source_url),
+                    client,
+                )
             )
 
         date_text = inferred_date or fetched_date
@@ -1212,6 +1456,7 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
                 "starts_at": self._normalize_datetime(date_text),
                 "city": inferred_city or fetched_city,
                 "venue": fetched_venue,
+                "distance_summary": event.distance_summary or fetched_distance_summary,
             }
         )
 
@@ -1232,7 +1477,7 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
 
     async def _fetch_russiarunning_details(
         self, source_url: str, client: httpx.AsyncClient
-    ) -> tuple[str | None, str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None, str | None]:
         slug = source_url.rstrip("/").split("/")[-1]
         candidate_urls: list[str] = []
         if slug:
@@ -1250,14 +1495,15 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
                 continue
 
             soup = BeautifulSoup(response.text, "html.parser")
+            distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
             date_text = self._extract_optional_text(soup, ".event-date")
             place_text = self._extract_optional_text(soup, ".place")
             if date_text or place_text:
                 city, venue = self._extract_russiarunning_place(place_text)
                 if date_text and self._looks_like_russiarunning_date(date_text):
-                    return self._cleanup_russiarunning_date(date_text), city, venue
+                    return self._cleanup_russiarunning_date(date_text), city, venue, distance_summary
                 if city or venue:
-                    return None, city, venue
+                    return None, city, venue, distance_summary
 
             for selector in (
                 "p.text-medium-semibold.mb-0-75",
@@ -1267,9 +1513,9 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
             ):
                 value = self._extract_optional_text(soup, selector)
                 if value and self._looks_like_russiarunning_date(value):
-                    return self._cleanup_russiarunning_date(value), None, None
+                    return self._cleanup_russiarunning_date(value), None, None, distance_summary
 
-        return None, None, None
+        return None, None, None, None
 
     def _looks_like_russiarunning_date(self, value: str) -> bool:
         normalized = value.lower()
@@ -1378,11 +1624,29 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
         image_url = item.get("imageUrl")
         source_url = f"https://reg.russiarunning.com/event/{code}"
         description = self._build_russiarunning_description(item)
+        organizer_name = item.get("organizerName")
+        registration_status, registration_deadline = self._extract_russiarunning_registration_details(item)
+        distance_summary = self._extract_russiarunning_distance_summary(item) or self._extract_distance_summary_from_text(
+            " ".join(
+                part
+                for part in (
+                    title,
+                    item.get("sportSeriesTitle") if isinstance(item.get("sportSeriesTitle"), str) else None,
+                    item.get("raceDescription") if isinstance(item.get("raceDescription"), str) else None,
+                    json.dumps(item, ensure_ascii=False),
+                )
+                if part
+            )
+        )
 
         return Event(
             id=f"russiarunning-{code}",
             title=title.strip(),
             description=description,
+            organizer_name=organizer_name.strip() if isinstance(organizer_name, str) and organizer_name.strip() else None,
+            registration_status=registration_status,
+            registration_deadline=registration_deadline,
+            distance_summary=distance_summary,
             city=city,
             region=None,
             federal_district=None,
@@ -1536,6 +1800,99 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
             return None
         return " • ".join(parts)
 
+    def _extract_russiarunning_registration_details(
+        self,
+        item: dict[str, Any],
+    ) -> tuple[str | None, str | None]:
+        race_items = item.get("raceItems")
+        if not isinstance(race_items, list) or not race_items:
+            return None, None
+
+        statuses: list[str] = []
+        deadlines: list[str] = []
+
+        for race_item in race_items:
+            if not isinstance(race_item, dict):
+                continue
+
+            registration_state = race_item.get("registrationDateState")
+            disable_registration = race_item.get("disableRegistration")
+            available_count = race_item.get("availableRegistrationsCount")
+
+            status = None
+            if disable_registration is True:
+                status = "closed"
+            elif registration_state == 3:
+                status = "open"
+            elif registration_state in {1, 2}:
+                status = "limited"
+
+            if isinstance(available_count, int):
+                if available_count <= 0:
+                    status = "closed"
+                elif available_count < 10 and status == "open":
+                    status = "limited"
+
+            if status:
+                statuses.append(status)
+
+            close_date = race_item.get("registrationCloseDate")
+            if isinstance(close_date, str) and close_date.strip():
+                formatted = self._format_russiarunning_date_text(close_date.strip())
+                if formatted:
+                    deadlines.append(f"до {formatted}")
+
+        registration_status = None
+        if "open" in statuses:
+            registration_status = "open"
+        elif "limited" in statuses:
+            registration_status = "limited"
+        elif "closed" in statuses:
+            registration_status = "closed"
+
+        registration_deadline = None
+        if deadlines:
+            registration_deadline = sorted(deadlines, key=len)[0]
+
+        return registration_status, registration_deadline
+
+    def _extract_russiarunning_distance_summary(self, item: dict[str, Any]) -> str | None:
+        race_items = item.get("raceItems")
+        if not isinstance(race_items, list):
+            return None
+
+        values: list[str] = []
+        seen: set[str] = set()
+        for race_item in race_items:
+            if not isinstance(race_item, dict):
+                continue
+            distance = race_item.get("distance")
+            if not isinstance(distance, (int, float)) or distance <= 0:
+                continue
+            formatted = self._format_russiarunning_distance_value(float(distance))
+            if not formatted or formatted in seen:
+                continue
+            seen.add(formatted)
+            values.append(formatted)
+
+        if not values:
+            return None
+        return " • ".join(values)
+
+    def _format_russiarunning_distance_value(self, value: float) -> str | None:
+        if value <= 0:
+            return None
+        if value < 1:
+            meters = int(round(value * 1000))
+            if meters <= 0:
+                return None
+            return f"{meters} м"
+
+        normalized = self._normalize_distance_value(str(value))
+        if not normalized:
+            return None
+        return f"{normalized} км"
+
 
 class ArtaSportParser(CssDirectoryParser):
     def parse(self, html: str, page_url: str) -> list[Event]:
@@ -1567,6 +1924,9 @@ class ArtaSportParser(CssDirectoryParser):
                     id=f"arta-sport-{index}-{stable_hash}",
                     title=title,
                     description=None,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, venue) if part)
+                    ),
                     city=self._extract_arta_city(venue),
                     region=self._extract_arta_region(venue),
                     federal_district=None,
@@ -1581,6 +1941,35 @@ class ArtaSportParser(CssDirectoryParser):
             )
 
         return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_arta_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_arta_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.distance_summary:
+            return event
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
+        return event.model_copy(update={"distance_summary": distance_summary or event.distance_summary})
 
     def _extract_image_from_style(self, node: Any) -> str | None:
         if node is None:
@@ -1877,6 +2266,9 @@ class VelomarathonParser(CssDirectoryParser):
                         title=title,
                         source_url=source_url,
                     ),
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, details, venue) if part)
+                    ),
                     city=self._extract_velomarathon_city(venue),
                     region=self._extract_velomarathon_region(venue),
                     federal_district=None,
@@ -1980,6 +2372,9 @@ class GranFondoParser(CssDirectoryParser):
                     id=f"granfondo-{index}-{stable_hash}",
                     title=title,
                     description=status,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, status) if part)
+                    ),
                     city=title.split(",")[0].strip(),
                     region=None,
                     federal_district=None,
@@ -1994,6 +2389,35 @@ class GranFondoParser(CssDirectoryParser):
             )
 
         return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_granfondo_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_granfondo_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.distance_summary:
+            return event
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
+        return event.model_copy(update={"distance_summary": distance_summary or event.distance_summary})
 
 
 class SwimcupParser(CssDirectoryParser):
@@ -2036,6 +2460,7 @@ class SwimcupParser(CssDirectoryParser):
                     id=f"swimcup-{len(events)}-{stable_hash}",
                     title=title,
                     description=" • ".join(description_parts) if description_parts else None,
+                    distance_summary=self._extract_distance_summary_from_text(distances or title),
                     city=self._normalize_swimcup_city(city),
                     region=None,
                     federal_district=None,
@@ -2072,6 +2497,80 @@ class SwimcupParser(CssDirectoryParser):
         }
         return replacements.get(cleaned, cleaned)
 
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_swimcup_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_swimcup_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.registration_status and event.registration_deadline and event.distance_summary:
+            return event
+
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        registration_status, registration_deadline = self._extract_swimcup_registration_details(soup)
+        distance_summary = event.distance_summary or self._extract_distance_summary_from_text(
+            soup.get_text(" ", strip=True)
+        )
+        return event.model_copy(
+            update={
+                "registration_status": registration_status or event.registration_status,
+                "registration_deadline": registration_deadline or event.registration_deadline,
+                "distance_summary": distance_summary or event.distance_summary,
+            }
+        )
+
+    def _extract_swimcup_registration_details(
+        self, soup: BeautifulSoup
+    ) -> tuple[str | None, str | None]:
+        text = soup.get_text(" ", strip=True)
+        normalized = re.sub(r"\s+", " ", text.replace("\xa0", " ")).casefold()
+
+        closed_markers = ("регистрация закрыта", "мест нет", "слоты законч", "sold out")
+        waitlist_markers = ("лист ожидания", "waiting list", "предзапись")
+        open_markers = ("зарегистрироваться", "регистрация на соревнования", "регистрация до")
+
+        status = None
+        if any(marker in normalized for marker in closed_markers):
+            status = "closed"
+        elif any(marker in normalized for marker in waitlist_markers):
+            status = "limited"
+        elif soup.select_one(".reg a.file[href]") and any(marker in normalized for marker in open_markers):
+            status = "open"
+
+        deadline = None
+        deadline_node = soup.select_one(".reg__date")
+        deadline_text = deadline_node.get_text(" ", strip=True) if deadline_node else None
+        if deadline_text:
+            cleaned = re.sub(r"\s+", " ", deadline_text.replace("\xa0", " ")).strip()
+            numeric = re.search(r"(\d{1,2}[./]\d{1,2}[./]\d{2,4})", cleaned)
+            month_name = re.search(
+                r"(\d{1,2}\s+[А-Яа-яЁё]+(?:\s+\d{4})?)",
+                cleaned,
+            )
+            if numeric:
+                deadline = f"до {numeric.group(1)}"
+            elif month_name:
+                deadline = f"до {month_name.group(1)}"
+
+        return status, deadline
+
 
 class CyclingRaceParser(CssDirectoryParser):
     def parse(self, html: str, page_url: str) -> list[Event]:
@@ -2102,6 +2601,9 @@ class CyclingRaceParser(CssDirectoryParser):
                     id=f"cyclingrace-{index}-{stable_hash}",
                     title=title.strip(),
                     description=None,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, location_text) if part)
+                    ),
                     city=city,
                     region="Москва" if city and "москва" in city.lower() else None,
                     federal_district=None,
@@ -2116,6 +2618,35 @@ class CyclingRaceParser(CssDirectoryParser):
             )
 
         return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_cyclingrace_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_cyclingrace_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.distance_summary:
+            return event
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
+        return event.model_copy(update={"distance_summary": distance_summary or event.distance_summary})
 
     def _extract_cyclingrace_location(
         self, location_text: str | None
@@ -2351,7 +2882,7 @@ class OTimeCalendarParser(CssDirectoryParser):
         client: httpx.AsyncClient,
         semaphore: asyncio.Semaphore,
     ) -> Event:
-        if event.city:
+        if event.city and event.distance_summary:
             return event
 
         async with semaphore:
@@ -2366,13 +2897,55 @@ class OTimeCalendarParser(CssDirectoryParser):
         location_text = self._extract_otime_detail_location(soup, event.title)
         city = self._extract_otime_city(location_text or event.venue, event.region)
         venue = location_text or event.venue
+        distance_summary = self._extract_otime_distance_summary(soup) or self._extract_distance_summary_from_text(
+            soup.get_text(" ", strip=True)
+        )
+        registration_status, registration_deadline = self._extract_otime_registration_details(soup)
 
         return event.model_copy(
             update={
                 "city": city or event.city,
                 "venue": venue,
+                "registration_status": registration_status or event.registration_status,
+                "registration_deadline": registration_deadline or event.registration_deadline,
+                "distance_summary": distance_summary or event.distance_summary,
             }
         )
+
+    def _extract_otime_distance_summary(self, soup: BeautifulSoup) -> str | None:
+        values: list[str] = []
+        seen: set[str] = set()
+
+        for node in soup.select(".dist"):
+            text = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip(" ,.")
+            if not text:
+                continue
+            normalized = self._extract_distance_summary_from_text(text)
+            candidate = normalized or self._normalize_source_specific_distance_label(text)
+            if not candidate:
+                continue
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            values.append(candidate)
+
+        if not values:
+            for cell in soup.select("tr td:first-child b"):
+                text = re.sub(r"\s+", " ", cell.get_text(" ", strip=True)).strip(" :,.")
+                if not text:
+                    continue
+                normalized = self._extract_distance_summary_from_text(text)
+                candidate = normalized or self._normalize_source_specific_distance_label(text)
+                if not candidate:
+                    continue
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                values.append(candidate)
+
+        if not values:
+            return None
+        return " • ".join(values)
 
     def _extract_otime_detail_location(
         self,
@@ -2395,6 +2968,32 @@ class OTimeCalendarParser(CssDirectoryParser):
             return geolink
 
         return None
+
+    def _extract_otime_registration_details(
+        self,
+        soup: BeautifulSoup,
+    ) -> tuple[str | None, str | None]:
+        text = soup.get_text(" ", strip=True)
+        normalized = text.casefold()
+
+        status = None
+        if "entry is open" in normalized or "регистрация открыта" in normalized:
+            status = "open"
+        elif "заявка откроется" in normalized or "opens" in normalized:
+            status = "limited"
+        elif "закрыта" in normalized or "entry is closed" in normalized:
+            status = "closed"
+
+        deadline = None
+        match = re.search(
+            r"(?:entry is open till|регистрация открыта до|прием заявок до)\s+(\d{1,2}\.\d{1,2}\.\d{4})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            deadline = f"до {match.group(1)}"
+
+        return status, deadline
 
 
 class MarathonCupParser(CssDirectoryParser):
@@ -2565,6 +3164,7 @@ class NezhesteamParser(CssDirectoryParser):
                     id=f"nezhesteam-{index}-{stable_hash}",
                     title=title,
                     description="Кросс-кантри гонка NEZHESTEAM в Ромашково",
+                    distance_summary=self._extract_distance_summary_from_text(title),
                     city="Ромашково",
                     region="Московская область",
                     federal_district=None,
@@ -2579,6 +3179,35 @@ class NezhesteamParser(CssDirectoryParser):
             )
 
         return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(6)
+        tasks = [
+            asyncio.create_task(self._enrich_nezhesteam_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_nezhesteam_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.distance_summary:
+            return event
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
+        return event.model_copy(update={"distance_summary": distance_summary or event.distance_summary})
 
 
 class MyRaceParser(CssDirectoryParser):
@@ -2637,6 +3266,157 @@ class MyRaceParser(CssDirectoryParser):
             )
 
         return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_myrace_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_myrace_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        organizer_name = self._extract_myrace_organizer(soup)
+        registration_status = self._extract_myrace_registration_status(soup)
+        distance_summary = self._extract_myrace_distance_summary(soup)
+
+        return event.model_copy(
+            update={
+                "organizer_name": organizer_name or event.organizer_name,
+                "registration_status": registration_status or event.registration_status,
+                "distance_summary": distance_summary or event.distance_summary,
+            }
+        )
+
+    def _extract_myrace_distance_summary(self, soup: BeautifulSoup) -> str | None:
+        values: list[str] = []
+        seen: set[str] = set()
+
+        def push(text: str | None) -> None:
+            if not text:
+                return
+            cleaned = re.sub(r"\s+", " ", text).strip(" ,.")
+            if not cleaned:
+                return
+            normalized = self._extract_distance_summary_from_text(cleaned)
+            candidate = normalized or self._normalize_source_specific_distance_label(cleaned)
+            if not candidate or candidate in seen:
+                return
+            seen.add(candidate)
+            values.append(candidate)
+
+        detail_text = soup.get_text(" ", strip=True)
+        numeric = self._extract_distance_summary_from_text(detail_text)
+        if numeric:
+            return numeric
+
+        for node in soup.select(
+            ".event-description li, .event-description p, .event-details-amount div, .event-details .block-text"
+        ):
+            push(node.get_text(" ", strip=True))
+
+        if values:
+            return " • ".join(values)
+
+        return self._extract_myrace_activity_summary(soup)
+
+    def _normalize_source_specific_distance_label(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        cleaned = re.sub(r"\s+", " ", value).strip(" ,.")
+        if not cleaned:
+            return None
+        lowered = cleaned.casefold()
+        if len(cleaned) > 40:
+            return None
+        if any(token in lowered for token in ("стоимость", "участник", "возраст", "регистрац", "доступн", "слот", "старт ", "награждение")):
+            return None
+        if re.fullmatch(r"[тt]-?\d{1,2}", lowered):
+            return cleaned.upper()
+        if re.fullmatch(r"(онлайн|online|догтрейл|кросс|забег|мтб|гревел|фикс/сингл|велокросс)", lowered):
+            return cleaned
+        if re.fullmatch(r"[а-яёa-z0-9+./ -]{1,30}", lowered) and re.search(r"\d", cleaned):
+            return cleaned
+        return None
+
+    def _extract_myrace_registration_status(self, soup: BeautifulSoup) -> str | None:
+        text = self._extract_optional_text(soup, "a.push-right.right") or self._extract_optional_text(soup, ".registration-status")
+        if not text:
+            return None
+        normalized = text.casefold()
+        if "закрыт" in normalized:
+            return "closed"
+        if "открыт" in normalized:
+            return "open"
+        if "ожидания" in normalized:
+            return "limited"
+        return None
+
+    def _extract_myrace_organizer(self, soup: BeautifulSoup) -> str | None:
+        text = soup.get_text("\n", strip=True)
+        match = re.search(
+            r"Группа\s+Организаторов\s+([^\n<]+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            organizer = match.group(1).strip(" :.-")
+            return organizer or None
+        return None
+
+    def _extract_myrace_activity_summary(self, soup: BeautifulSoup) -> str | None:
+        labels: list[str] = []
+        blocks = list(soup.select(".event-details .block-text"))
+        candidate_blocks: list[Any] = []
+        for block in blocks:
+            heading = block.find("label")
+            title = heading.get_text(" ", strip=True).casefold() if heading else ""
+            classes = " ".join(block.get("class", [])) if hasattr(block, "get") else ""
+            text = block.get_text(" ", strip=True).casefold()
+            if "contacts" in classes:
+                continue
+            if heading is not None and "дисциплины" in title:
+                candidate_blocks.append(block)
+                continue
+            if heading is None and "дисциплины" in text:
+                candidate_blocks.append(block)
+
+        if not candidate_blocks and blocks:
+            candidate_blocks.append(blocks[0])
+
+        for block in candidate_blocks:
+            for item in block.select(".event-details-amount"):
+                first = item.select_one("div")
+                if first is None:
+                    continue
+                text = re.sub(r"\s+", " ", first.get_text(" ", strip=True)).strip(" ,.")
+                if not text:
+                    continue
+                if re.fullmatch(r"\d+(?:[.,]\d+)?\s*(?:км|м)", text, flags=re.IGNORECASE):
+                    continue
+                if text not in labels:
+                    labels.append(text)
+            if labels:
+                break
+
+        if not labels:
+            return None
+        return " • ".join(labels[:4])
 
 
 class RaceTimeParser(CssDirectoryParser):
@@ -2721,6 +3501,9 @@ class RaceTimeParser(CssDirectoryParser):
                     id=f"racetime-{index}-{stable_hash}",
                     title=title,
                     description=description,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, secondary) if part)
+                    ),
                     city=city.strip() if isinstance(city, str) and city.strip() else None,
                     region=None,
                     federal_district=None,
@@ -2736,7 +3519,18 @@ class RaceTimeParser(CssDirectoryParser):
 
         return events
 
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_racetime_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
     def _parse_racetime_detail(self, html: str, page_url: str) -> Event | None:
+        soup = BeautifulSoup(html, "html.parser")
         title_match = re.search(r"<title>(.*?)</title>", html, re.S | re.I)
         title = None
         if title_match:
@@ -2761,6 +3555,7 @@ class RaceTimeParser(CssDirectoryParser):
             id=f"racetime-direct-{stable_hash}",
             title=title,
             description=None,
+            distance_summary=self._extract_distance_summary_from_text(soup.get_text(" ", strip=True)),
             city=None,
             region=None,
             federal_district=None,
@@ -2772,6 +3567,25 @@ class RaceTimeParser(CssDirectoryParser):
             source_url=page_url,
             image_url=urljoin(page_url, image_url) if isinstance(image_url, str) and image_url else None,
         )
+
+    async def _enrich_racetime_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.distance_summary:
+            return event
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+        distance_summary = self._extract_distance_summary_from_text(
+            BeautifulSoup(response.text, "html.parser").get_text(" ", strip=True)
+        )
+        return event.model_copy(update={"distance_summary": distance_summary or event.distance_summary})
 
     def _extract_racetime_payload(self, html: str) -> dict[str, dict[str, Any]]:
         marker = "var GLOBAL_races ="
@@ -2920,6 +3734,42 @@ class SportidentParser(CssDirectoryParser):
 
         return events
 
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_sportident_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_sportident_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.distance_summary and event.registration_status and event.registration_deadline:
+            return event
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
+        registration_status, registration_deadline = self._extract_sportident_registration_details(soup)
+        return event.model_copy(
+            update={
+                "distance_summary": distance_summary or event.distance_summary,
+                "registration_status": registration_status or event.registration_status,
+                "registration_deadline": registration_deadline or event.registration_deadline,
+            }
+        )
+
     def _normalize_sportident_date_text(
         self, value: str | None, month_year: str | None
     ) -> str | None:
@@ -3006,10 +3856,63 @@ class SportidentParser(CssDirectoryParser):
         cleaned = re.sub(r"^(г\.\s*)", "", cleaned, flags=re.IGNORECASE)
         return cleaned
 
-    async def enrich_events(
-        self, events: list[Event], client: httpx.AsyncClient
-    ) -> list[Event]:
-        return events
+    def _extract_sportident_registration_details(
+        self, soup: BeautifulSoup
+    ) -> tuple[str | None, str | None]:
+        text = soup.get_text(" ", strip=True)
+        normalized = re.sub(r"\s+", " ", text.replace("\xa0", " ")).casefold()
+
+        closed_markers = (
+            "регистрация закрыта",
+            "заявка закрыта",
+            "мест нет",
+            "слоты законч",
+        )
+        if any(marker in normalized for marker in closed_markers):
+            return "closed", None
+
+        deadline = None
+        range_match = re.search(
+            r"регистрация участников с\s*(\d{1,2}\s+[а-яё]+(?:\s+\d{4})?|\d{1,2}[./]\d{1,2}[./]\d{2,4})\s*по\s*(\d{1,2}\s+[а-яё]+(?:\s+\d{4})?|\d{1,2}[./]\d{1,2}[./]\d{2,4})",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if range_match:
+            start_raw = range_match.group(1)
+            end_raw = range_match.group(2)
+            deadline = f"до {end_raw}"
+            start_dt = self._normalize_datetime(start_raw)
+            end_dt = self._normalize_datetime(end_raw)
+            now = datetime.now()
+            if start_dt and end_dt:
+                try:
+                    if datetime.fromisoformat(start_dt) <= now <= datetime.fromisoformat(end_dt):
+                        return "open", deadline
+                    if now > datetime.fromisoformat(end_dt):
+                        return "closed", deadline
+                    return None, deadline
+                except ValueError:
+                    pass
+
+        open_at_match = re.search(
+            r"заявка откроется\s*(\d{1,2}[./]\d{1,2}[./]\d{2,4})",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if open_at_match:
+            open_at = open_at_match.group(1)
+            try:
+                open_dt = datetime.fromisoformat(self._normalize_datetime(open_at) or "")
+                if datetime.now() >= open_dt:
+                    return "open", deadline
+            except ValueError:
+                pass
+            return None, deadline
+
+        if "?id=" in str(soup) and "заявиться" in normalized:
+            return "open", deadline
+
+        return None, deadline
 
 
 class LaStradaParser(CssDirectoryParser):
@@ -3066,6 +3969,9 @@ class LaStradaParser(CssDirectoryParser):
                     id=f"lastrada-{index}-{stable_hash}",
                     title=title,
                     description=address,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        json.dumps(item, ensure_ascii=False)
+                    ),
                     city=city,
                     region=None,
                     federal_district=None,
@@ -3214,6 +4120,7 @@ class CityTrailParser(CssDirectoryParser):
             id=f"city-trail-{index}-{stable_hash}",
             title=title,
             description=description,
+            distance_summary=self._extract_distance_summary_from_text(soup.get_text(" ", strip=True)),
             city=None if city in {None, "-", "—"} else city,
             region=None,
             federal_district=None,
@@ -3262,6 +4169,9 @@ class BorisovoParser(CssDirectoryParser):
                     id=f"borisovo-{index}-{stable_hash}",
                     title=title.rstrip("!"),
                     description=description,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, description) if part)
+                    ),
                     city="Серпухов",
                     region="Московская область",
                     federal_district=None,
@@ -3370,6 +4280,9 @@ class XWatersParser(CssDirectoryParser):
                     id=f"xwaters-{index}-{stable_hash}",
                     title=title,
                     description=description,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, description) if part)
+                    ),
                     city=None,
                     region=None,
                     federal_district=None,
@@ -3428,6 +4341,7 @@ class XWatersParser(CssDirectoryParser):
 
         city, region, venue = self._extract_xwaters_location(location_text or "")
         image_url = self._extract_optional_attr(soup, 'meta[property="og:image"]', "content") or event.image_url
+        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
 
         return event.model_copy(
             update={
@@ -3438,6 +4352,7 @@ class XWatersParser(CssDirectoryParser):
                 "city": city or event.city,
                 "region": region or event.region,
                 "venue": venue or event.venue,
+                "distance_summary": distance_summary or event.distance_summary,
                 "image_url": image_url,
             }
         )
@@ -3507,6 +4422,7 @@ class IronStarParser(CssDirectoryParser):
                     id=f"ironstar-{index}-{stable_hash}",
                     title=title,
                     description=None,
+                    distance_summary=self._extract_ironstar_distance(title, href),
                     city=normalized_city,
                     region=None,
                     federal_district=None,
@@ -3521,6 +4437,51 @@ class IronStarParser(CssDirectoryParser):
             )
 
         return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_ironstar_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_ironstar_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.distance_summary:
+            return event
+
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        meta_description = self._extract_optional_attr(soup, 'meta[name="description"]', "content")
+        og_description = self._extract_optional_attr(soup, 'meta[property="og:description"]', "content")
+        body_text = soup.get_text(" ", strip=True)
+        distance_summary = self._extract_ironstar_distance(
+            " ".join(
+                part
+                for part in (event.title, str(event.source_url), meta_description, og_description, body_text)
+                if part
+            ),
+            str(event.source_url),
+        )
+
+        return event.model_copy(
+            update={
+                "distance_summary": distance_summary or event.distance_summary,
+            }
+        )
 
     def _extract_ironstar_title(self, card: Any) -> str | None:
         raw_title = card.get("title")
@@ -3542,6 +4503,28 @@ class IronStarParser(CssDirectoryParser):
         if "starkids" in combined or "kids" in combined:
             return "Детские старты"
         return "Триатлон"
+
+    def _extract_ironstar_distance(self, title: str, href: str) -> str | None:
+        combined = f"{title} {href}"
+        distance = self._extract_distance_summary_from_text(combined)
+        if distance:
+            return distance
+
+        normalized = combined.casefold()
+        aliases = [
+            ("1k", "1 км"),
+            ("1 к", "1 км"),
+            ("2 мили", "2 мили"),
+            ("double mile", "2 мили"),
+            ("olympic", "51.5 км"),
+            ("113", "113 км"),
+            ("226", "226 км"),
+            ("sprint", "Спринт"),
+        ]
+        for marker, value in aliases:
+            if marker in normalized:
+                return value
+        return None
 
 
 class GoldenUltraParser(CssDirectoryParser):
@@ -3634,6 +4617,7 @@ class GoldenUltraParser(CssDirectoryParser):
             id=f"goldenultra-{index}-{stable_hash}",
             title=title,
             description=None,
+            distance_summary=self._extract_distance_summary_from_text(page_text),
             city=city,
             region=None,
             federal_district=None,
@@ -3764,6 +4748,9 @@ class ArfCalendarParser(CssDirectoryParser):
                     id=f"arf-{index}-{stable_hash}",
                     title=title,
                     description=None,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, meta_text) if part)
+                    ),
                     city=city,
                     region=None,
                     federal_district=None,
@@ -3855,6 +4842,9 @@ class VelogearanceParser(CssDirectoryParser):
                     id=f"velogearance-{index}-{stable_hash}",
                     title=title,
                     description=description,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, description) if part)
+                    ),
                     city=city,
                     region=None,
                     federal_district=None,
@@ -3912,6 +4902,8 @@ class VelogearanceParser(CssDirectoryParser):
                 "starts_at": self._normalize_datetime(date_text) or event.starts_at,
                 "city": city or event.city,
                 "venue": venue or event.venue,
+                "distance_summary": self._extract_distance_summary_from_text(combined)
+                or event.distance_summary,
             }
         )
 
@@ -4001,6 +4993,9 @@ class XCNewsParser(CssDirectoryParser):
                     id=f"xcnews-{index}-{stable_hash}",
                     title=title,
                     description=None,
+                    distance_summary=self._extract_distance_summary_from_text(
+                        " ".join(part for part in (title, race_type) if part)
+                    ),
                     city=city,
                     region=None,
                     federal_district=None,
@@ -4015,6 +5010,36 @@ class XCNewsParser(CssDirectoryParser):
             )
 
         return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_xcnews_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_xcnews_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.distance_summary:
+            return event
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        html = response.content.decode("cp1251", errors="ignore")
+        soup = BeautifulSoup(html, "html.parser")
+        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
+        return event.model_copy(update={"distance_summary": distance_summary or event.distance_summary})
 
     def _extract_xcnews_location(self, raw_location: str | None) -> tuple[str | None, str | None]:
         if not raw_location:

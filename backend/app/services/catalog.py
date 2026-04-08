@@ -55,6 +55,10 @@ class EventFilters:
     cities: list[str] | None = None
     categories: list[str] | None = None
     recommended: bool = False
+    registration_status: str | None = None
+    kids_only: bool = False
+    surface_type: str | None = None
+    difficulty_level: str | None = None
     source: str | None = None
     date_from: str | None = None
     date_to: str | None = None
@@ -82,6 +86,46 @@ class CatalogService:
         ("open_band", "OPEN BAND", ("open band", "openband.run", "openband")),
         ("russialoppet", "RUSSIALOPPET", ("russialoppet", "руссиалоппет", "серия лыжных марафонов")),
         ("running_community", "RUNC", ("running community", "runc.run", "московский марафон", "беговое сообщество")),
+    )
+    OFFICIAL_SOURCE_NAMES: frozenset[str] = frozenset(
+        {
+            "Russia Running",
+            "Russialoppet",
+            "Running Community",
+            "Marzocchi Cup",
+            "TRI NITI CUP",
+            "Golden Ultra",
+            "IRONSTAR",
+            "Gran Fondo",
+            "Marathon Cup",
+            "Galtropa",
+            "Nezhesteam",
+            "X-WATERS",
+            "Swimcup",
+            "La Strada",
+            "City Trail",
+            "Borisovo.cluB",
+        }
+    )
+    REGISTRATION_SOURCE_NAMES: frozenset[str] = frozenset(
+        {
+            "REGPLACE",
+            "Orgeo",
+            "O-Time",
+            "MyRace",
+            "RaceTime",
+            "Sportident",
+        }
+    )
+    CALENDAR_SOURCE_NAMES: frozenset[str] = frozenset(
+        {
+            "Velogearance",
+            "Velomarathon",
+            "XCnews",
+            "ARF",
+            "Arta Sport",
+            "CyclingRace",
+        }
     )
     REGION_ALIASES: dict[str, tuple[str, ...]] = {
         "Москва": (
@@ -809,8 +853,8 @@ class CatalogService:
             if self._should_preserve_existing_cache(normalized_events):
                 return
 
-            self._cache = normalized_events
             self._cache_created_at = time.time()
+            self._cache = self._apply_cache_metadata(normalized_events, self._cache_created_at)
             self._cache_version = settings.cache_version
             self._rebuild_filter_metadata()
             self._write_persistent_cache()
@@ -845,6 +889,8 @@ class CatalogService:
                 if cache_version == settings.cache_version
                 else 0.0
             )
+            if self._cache_created_at:
+                self._cache = self._apply_cache_metadata(self._cache, self._cache_created_at)
             self._cache_version = cache_version
             self._rebuild_filter_metadata()
         except (json.JSONDecodeError, OSError, ValueError, TypeError):
@@ -1193,8 +1239,29 @@ class CatalogService:
                 "starts_at": self._normalize_starts_at(event.date_text, event.starts_at),
                 "series_slug": series_slug,
                 "series_name": series_name,
+                "source_label": event.source_label or self._build_source_label(event),
+                "source_type": event.source_type or self._detect_source_type(event),
+                "registration_status": event.registration_status or self._detect_registration_status(event),
+                "distance_summary": event.distance_summary or self._extract_distance_summary(event),
+                "participation_format": event.participation_format or self._detect_participation_format(event),
+                "kids_available": event.kids_available if event.kids_available is not None else self._detect_kids_available(event),
+                "organizer_name": event.organizer_name or self._detect_organizer_name(event),
+                "price_from": event.price_from or self._extract_price_from(event),
+                "registration_deadline": event.registration_deadline or self._extract_registration_deadline(event),
+                "slots_status": event.slots_status or self._detect_slots_status(event),
+                "surface_type": event.surface_type or self._detect_surface_type(event),
+                "difficulty_level": event.difficulty_level or self._detect_difficulty_level(event),
             }
         )
+
+    def _apply_cache_metadata(self, events: list[Event], checked_at: float) -> list[Event]:
+        checked_at_iso = datetime.fromtimestamp(checked_at).isoformat() if checked_at else None
+        if not checked_at_iso:
+            return events
+        return [
+            event.model_copy(update={"last_checked_at": checked_at_iso})
+            for event in events
+        ]
 
     def _detect_series(self, event: Event) -> tuple[str | None, str | None]:
         haystack = " ".join(
@@ -1211,6 +1278,300 @@ class CatalogService:
             if any(marker in haystack for marker in markers):
                 return slug, name
         return None, None
+
+    def _build_source_label(self, event: Event) -> str:
+        return event.source_name
+
+    def _detect_source_type(self, event: Event) -> str:
+        source_name = (event.source_name or "").strip()
+        source_url = str(event.source_url).casefold()
+        if source_name in self.OFFICIAL_SOURCE_NAMES:
+            return "official"
+        if source_name in self.REGISTRATION_SOURCE_NAMES:
+            return "registration"
+        if source_name in self.CALENDAR_SOURCE_NAMES:
+            return "calendar"
+        if any(marker in source_url for marker in ("reg.", "/event/", "/entry/", "/race/")):
+            return "registration"
+        return "official"
+
+    def _detect_registration_status(self, event: Event) -> str | None:
+        haystack = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+                str(event.source_url),
+            )
+            if part
+        ).casefold()
+
+        closed_markers = (
+            "регистрация закрыта",
+            "registration closed",
+            "мест нет",
+            "sold out",
+            "слоты законч",
+            "регистрация завершена",
+            "заявки не принимаются",
+        )
+        open_markers = (
+            "регистрация открыта",
+            "online регистрация",
+            "онлайн регистрация",
+            "open registration",
+            "зарегистрироваться",
+            "открыта регистрация",
+        )
+        waitlist_markers = (
+            "лист ожидания",
+            "waiting list",
+            "предзапись",
+        )
+
+        if any(marker in haystack for marker in closed_markers):
+            return "closed"
+        if any(marker in haystack for marker in waitlist_markers):
+            return "limited"
+        if any(marker in haystack for marker in open_markers):
+            return "open"
+        return None
+
+    def _extract_distance_summary(self, event: Event) -> str | None:
+        text = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+            )
+            if part
+        )
+        if not text:
+            return None
+
+        distances: list[str] = []
+        group_match = re.search(
+            r"(\d+(?:[.,]\d+)?(?:\s*(?:/|и|-|•|;|,\s+)\s*\d+(?:[.,]\d+)?)+)\s*(км|km)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if group_match:
+            for value in re.findall(r"\d+(?:[.,]\d+)?", group_match.group(1)):
+                normalized = self._normalize_distance_value(value)
+                label = f"{normalized} км"
+                if normalized and label not in distances:
+                    distances.append(label)
+
+        km_matches = re.findall(r"(\d+(?:[.,]\d+)?)\s*(км|km)\b", text, flags=re.IGNORECASE)
+        meter_matches = re.findall(r"(\d{3,5})\s*(м)\b", text, flags=re.IGNORECASE)
+
+        for value, _unit in km_matches:
+            normalized = self._normalize_distance_value(value)
+            label = f"{normalized} км"
+            if label not in distances:
+                distances.append(label)
+
+        for value, _unit in meter_matches:
+            meters = int(value)
+            if meters >= 1000 and f"{meters} м" not in distances:
+                distances.append(f"{meters} м")
+
+        if not distances:
+            return None
+        return " • ".join(distances)
+
+    def _normalize_distance_value(self, value: str) -> str:
+        cleaned = value.strip().replace(",", ".")
+        if cleaned.endswith(".0"):
+            cleaned = cleaned[:-2]
+        return cleaned
+
+    def _detect_participation_format(self, event: Event) -> str | None:
+        haystack = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+            )
+            if part
+        ).casefold()
+        if not haystack:
+            return None
+
+        if any(marker in haystack for marker in ("эстафет", "relay")):
+            return "Эстафета"
+        if any(marker in haystack for marker in ("команд", "team")):
+            return "Командный"
+        if any(marker in haystack for marker in ("семейн", "family")):
+            return "Семейный"
+        if any(marker in haystack for marker in ("индивиду", "личный зачет", "личный зачёт")):
+            return "Индивидуальный"
+        return None
+
+    def _detect_kids_available(self, event: Event) -> bool | None:
+        haystack = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+                event.category,
+            )
+            if part
+        ).casefold()
+        if not haystack:
+            return None
+        if any(marker in haystack for marker in ("детск", "kids", "family", "семейн")):
+            return True
+        if event.category and event.category.casefold() == "детские старты":
+            return True
+        return None
+
+    def _detect_organizer_name(self, event: Event) -> str | None:
+        description = (event.description or "").strip()
+        if " • " in description:
+            first_part = description.split(" • ", 1)[0].strip()
+            if first_part and len(first_part) > 2 and not re.search(r"\d", first_part):
+                return first_part
+
+        if event.series_name:
+            return event.series_name
+
+        source_name = (event.source_name or "").strip()
+        if source_name in self.OFFICIAL_SOURCE_NAMES:
+            return source_name
+        return None
+
+    def _extract_price_from(self, event: Event) -> str | None:
+        text = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+            )
+            if part
+        )
+        if not text:
+            return None
+
+        prices: list[int] = []
+        for match in re.finditer(r"(?:от\s*)?(\d[\d\s]{2,6})\s*(?:₽|руб\.?|рублей)", text, flags=re.IGNORECASE):
+            raw = re.sub(r"\s+", "", match.group(1))
+            try:
+                value = int(raw)
+            except ValueError:
+                continue
+            if 100 <= value <= 200000:
+                prices.append(value)
+
+        if not prices:
+            return None
+        return f"от {min(prices)} ₽"
+
+    def _extract_registration_deadline(self, event: Event) -> str | None:
+        text = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+            )
+            if part
+        )
+        if not text:
+            return None
+
+        numeric_match = re.search(
+            r"(?:до|deadline|регистрация до)\s+(\d{1,2}[./]\d{1,2}[./]\d{2,4})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if numeric_match:
+            return f"до {numeric_match.group(1)}"
+
+        month_match = re.search(
+            r"(?:до|deadline|регистрация до)\s+(\d{1,2}\s+[а-яё]+(?:\s+\d{4})?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if month_match:
+            return f"до {month_match.group(1)}"
+
+        return None
+
+    def _detect_slots_status(self, event: Event) -> str | None:
+        text = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+            )
+            if part
+        ).casefold()
+        if not text:
+            return None
+
+        if any(marker in text for marker in ("мест нет", "sold out", "слоты законч", "нет слотов")):
+            return "Нет мест"
+        if any(marker in text for marker in ("лист ожидания", "waiting list")):
+            return "Лист ожидания"
+
+        slots_match = re.search(r"остал(?:ось|ось)\s+(\d+)\s+(?:мест|слотов)", text)
+        if slots_match:
+            return f"Осталось {slots_match.group(1)} мест"
+
+        if event.registration_status == "open":
+            return "Слоты доступны"
+        return None
+
+    def _detect_surface_type(self, event: Event) -> str | None:
+        haystack = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+                event.category,
+                event.venue,
+            )
+            if part
+        ).casefold()
+        if not haystack:
+            return None
+
+        if any(token in haystack for token in ("открытая вода", "open water", "заплыв", "озеро", "река", "море")):
+            return "Открытая вода"
+        if any(token in haystack for token in ("асфальт", "шоссе", "road", "критериум")):
+            return "Асфальт"
+        if any(token in haystack for token in ("грейвел", "gravel")):
+            return "Грейвел"
+        if any(token in haystack for token in ("mtb", "кросс-кантри", "лесн", "трейл", "trail", "пересеч", "бездорож", "офф-роуд", "offroad", "грунт")):
+            return "Грунт / трейл"
+        if any(token in haystack for token in ("лыжероллер", "роллер")):
+            return "Роллерная трасса"
+        if any(token in haystack for token in ("лыж", "снег")):
+            return "Снежная трасса"
+        if any(token in haystack for token in ("городск", "парк", "набереж")):
+            return "Городская трасса"
+        return None
+
+    def _detect_difficulty_level(self, event: Event) -> str | None:
+        haystack = " ".join(
+            part
+            for part in (
+                event.title,
+                event.description,
+                event.category,
+            )
+            if part
+        ).casefold()
+        if not haystack:
+            return None
+
+        if any(token in haystack for token in ("для опытных", "профи", "элит", "сложн", "ультра", "горн", "технич")):
+            return "Высокая сложность"
+        if any(token in haystack for token in ("для начинающих", "нович", "семейн", "детск", "спринт", "короткая")):
+            return "Подойдёт новичкам"
+        if any(token in haystack for token in ("пересечённая местность", "пересеченная местность", "trail", "трейл", "mtb")):
+            return "Средняя сложность"
+        return None
 
     def build_available_cities(self, events: list[Event]) -> list[str]:
         major_cities = {
@@ -1542,6 +1903,37 @@ class CatalogService:
                 event
                 for event in filtered
                 if event.series_slug is not None
+            ]
+
+        if filters.registration_status:
+            status = filters.registration_status.casefold().strip()
+            filtered = [
+                event
+                for event in filtered
+                if (event.registration_status or "").casefold() == status
+            ]
+
+        if filters.kids_only:
+            filtered = [
+                event
+                for event in filtered
+                if event.kids_available is True
+            ]
+
+        if filters.surface_type:
+            surface = filters.surface_type.casefold().strip()
+            filtered = [
+                event
+                for event in filtered
+                if (event.surface_type or "").casefold() == surface
+            ]
+
+        if filters.difficulty_level:
+            difficulty = filters.difficulty_level.casefold().strip()
+            filtered = [
+                event
+                for event in filtered
+                if (event.difficulty_level or "").casefold() == difficulty
             ]
 
         if filters.source:

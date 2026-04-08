@@ -12,6 +12,28 @@ type FiltersPanelProps = {
   onReset: () => void;
 };
 
+const REGISTRATION_OPTIONS = [
+  { value: "open", label: "Открыта" },
+  { value: "closed", label: "Закрыта" },
+  { value: "limited", label: "Лист ожидания" }
+];
+
+const SURFACE_OPTIONS = [
+  "Асфальт",
+  "Грунт / трейл",
+  "Грейвел",
+  "Открытая вода",
+  "Роллерная трасса",
+  "Снежная трасса",
+  "Городская трасса"
+];
+
+const DIFFICULTY_OPTIONS = [
+  "Подойдёт новичкам",
+  "Средняя сложность",
+  "Высокая сложность"
+];
+
 export const FiltersPanel = ({
   filters,
   cities,
@@ -25,6 +47,7 @@ export const FiltersPanel = ({
     typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
   const [regionDraft, setRegionDraft] = useState("");
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [isExperimentalOpen, setIsExperimentalOpen] = useState(false);
   const normalizedCategories = filters.categories.map(
     (category) => normalizeCategoryLabel(category) ?? category
   );
@@ -32,6 +55,12 @@ export const FiltersPanel = ({
     normalizedCategories.length ? normalizedCategories.join(", ") : "",
     filters.cities.length ? filters.cities.join(", ") : "",
     filters.recommended ? "Рекомендуемые" : "",
+    filters.registrationStatus
+      ? `Регистрация: ${REGISTRATION_OPTIONS.find((option) => option.value === filters.registrationStatus)?.label ?? filters.registrationStatus}`
+      : "",
+    filters.kidsOnly ? "Детские категории" : "",
+    filters.surfaceType ? filters.surfaceType : "",
+    filters.difficultyLevel ? filters.difficultyLevel : "",
     filters.q ? `Поиск: ${filters.q}` : "",
     filters.dateFrom ? `От ${filters.dateFrom}` : "",
     filters.dateTo ? `До ${filters.dateTo}` : "",
@@ -46,7 +75,29 @@ export const FiltersPanel = ({
     if (filters.cities.length > 0 || Boolean(filters.q) || filters.includePast) {
       setIsAdvancedOpen(true);
     }
-  }, [filters.cities.length, filters.includePast, filters.q]);
+  }, [
+    filters.cities.length,
+    filters.includePast,
+    filters.q
+  ]);
+
+  useEffect(() => {
+    if (
+      filters.showDetails ||
+      Boolean(filters.registrationStatus) ||
+      filters.kidsOnly ||
+      Boolean(filters.surfaceType) ||
+      Boolean(filters.difficultyLevel)
+    ) {
+      setIsExperimentalOpen(true);
+    }
+  }, [
+    filters.showDetails,
+    filters.registrationStatus,
+    filters.kidsOnly,
+    filters.surfaceType,
+    filters.difficultyLevel
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -297,7 +348,12 @@ export const FiltersPanel = ({
               </div>
             </div>
 
-            {(filters.cities.length > 0 || normalizedCategories.length > 0) ? (
+            {(filters.cities.length > 0 ||
+              normalizedCategories.length > 0 ||
+              filters.registrationStatus ||
+              filters.kidsOnly ||
+              filters.surfaceType ||
+              filters.difficultyLevel) ? (
               <div className="filters__cluster filters__cluster--selected">
                 <span className="filters__subhead">Выбрано</span>
                 <div className="selected-chips">
@@ -321,9 +377,157 @@ export const FiltersPanel = ({
                       {city} ×
                     </button>
                   ))}
+                  {filters.registrationStatus ? (
+                    <button
+                      type="button"
+                      className="selected-chip"
+                      onClick={() =>
+                        onChange({
+                          ...filters,
+                          registrationStatus: ""
+                        })
+                      }
+                    >
+                      {REGISTRATION_OPTIONS.find((option) => option.value === filters.registrationStatus)?.label ?? filters.registrationStatus} ×
+                    </button>
+                  ) : null}
+                  {filters.surfaceType ? (
+                    <button
+                      type="button"
+                      className="selected-chip"
+                      onClick={() =>
+                        onChange({
+                          ...filters,
+                          surfaceType: ""
+                        })
+                      }
+                    >
+                      {filters.surfaceType} ×
+                    </button>
+                  ) : null}
+                  {filters.difficultyLevel ? (
+                    <button
+                      type="button"
+                      className="selected-chip"
+                      onClick={() =>
+                        onChange({
+                          ...filters,
+                          difficultyLevel: ""
+                        })
+                      }
+                    >
+                      {filters.difficultyLevel} ×
+                    </button>
+                  ) : null}
+                  {filters.kidsOnly ? (
+                    <button
+                      type="button"
+                      className="selected-chip"
+                      onClick={() =>
+                        onChange({
+                          ...filters,
+                          kidsOnly: false
+                        })
+                      }
+                    >
+                      Детские категории ×
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}
+          </div>
+        </details>
+
+        <details
+          className="filters__advanced-panel filters__experimental-panel"
+          open={isExperimentalOpen}
+          onToggle={(event) => setIsExperimentalOpen(event.currentTarget.open)}
+        >
+          <summary className="filters__advanced-toggle">
+            Экспериментальные фильтры
+          </summary>
+
+          <div className="filters__section filters__section--advanced">
+            <div className="filters__toolbar filters__toolbar--advanced filters__toolbar--signals">
+              <label className="field field--compact">
+                <span>Регистрация</span>
+                <select value={filters.registrationStatus} onChange={updateField("registrationStatus")}>
+                  <option value="">Любой статус</option>
+                  {REGISTRATION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field field--compact">
+                <span>Трасса</span>
+                <select value={filters.surfaceType} onChange={updateField("surfaceType")}>
+                  <option value="">Любой тип</option>
+                  {SURFACE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field field--compact">
+                <span>Сложность</span>
+                <select value={filters.difficultyLevel} onChange={updateField("difficultyLevel")}>
+                  <option value="">Любая</option>
+                  {DIFFICULTY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="filters__quick-toggle-row filters__quick-toggle-row--secondary">
+              <button
+                type="button"
+                className={`filters__quick-toggle${filters.showDetails ? " filters__quick-toggle--active" : ""}`}
+                aria-pressed={filters.showDetails}
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    showDetails: !filters.showDetails
+                  })
+                }
+              >
+                <span className="filters__quick-toggle-copy">
+                  <span className="filters__quick-toggle-label">Детали в карточках</span>
+                  <span className="filters__quick-toggle-hint">регистрация, дистанции и покрытие</span>
+                </span>
+                <span className="filters__quick-toggle-switch" aria-hidden="true">
+                  <span className="filters__quick-toggle-knob" />
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className={`filters__quick-toggle${filters.kidsOnly ? " filters__quick-toggle--active" : ""}`}
+                aria-pressed={filters.kidsOnly}
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    kidsOnly: !filters.kidsOnly
+                  })
+                }
+              >
+                <span className="filters__quick-toggle-copy">
+                  <span className="filters__quick-toggle-label">Детские</span>
+                  <span className="filters__quick-toggle-hint">только с детскими категориями</span>
+                </span>
+                <span className="filters__quick-toggle-switch" aria-hidden="true">
+                  <span className="filters__quick-toggle-knob" />
+                </span>
+              </button>
+            </div>
           </div>
         </details>
 

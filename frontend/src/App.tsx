@@ -10,6 +10,11 @@ const initialFilters: FiltersState = {
   cities: [],
   categories: [],
   recommended: false,
+  showDetails: false,
+  registrationStatus: "",
+  kidsOnly: false,
+  surfaceType: "",
+  difficultyLevel: "",
   dateFrom: "",
   dateTo: "",
   sortBy: "date_asc",
@@ -86,6 +91,11 @@ const loadSavedFilters = (): FiltersState => {
       sortBy: parsed.sortBy === "date_desc" ? "date_desc" : "date_asc",
       includePast: Boolean(parsed.includePast),
       recommended: Boolean(parsed.recommended),
+      showDetails: Boolean(parsed.showDetails),
+      registrationStatus: typeof parsed.registrationStatus === "string" ? parsed.registrationStatus : "",
+      kidsOnly: Boolean(parsed.kidsOnly),
+      surfaceType: typeof parsed.surfaceType === "string" ? parsed.surfaceType : "",
+      difficultyLevel: typeof parsed.difficultyLevel === "string" ? parsed.difficultyLevel : "",
       cities: Array.isArray(parsed.cities) ? parsed.cities : legacyCity ? [legacyCity] : [],
       categories: Array.isArray(parsed.categories)
         ? parsed.categories.map((category) => normalizeCategoryLabel(category) ?? category)
@@ -189,7 +199,7 @@ function App() {
 
       <section className="events-grid">
         {data.items.map((event) => (
-          <EventCard key={event.id} event={event} />
+          <EventCard key={event.id} event={event} showDetails={filters.showDetails} />
         ))}
       </section>
 
