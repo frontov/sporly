@@ -762,7 +762,7 @@ class OrgeoParser(CssDirectoryParser):
                 if next_url not in seen_pages and next_url not in page_queue:
                     page_queue.append(next_url)
 
-        return await self.enrich_events(events, client)
+        return events
 
     def parse(self, html: str, page_url: str) -> list[Event]:
         soup = BeautifulSoup(html, "html.parser")
