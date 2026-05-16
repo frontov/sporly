@@ -834,7 +834,14 @@ class OrgeoParser(CssDirectoryParser):
             asyncio.create_task(self._enrich_orgeo_event(event, client, semaphore))
             for event in events
         ]
-        return await asyncio.gather(*tasks)
+        enriched = await asyncio.gather(*tasks, return_exceptions=True)
+        result: list[Event] = []
+        for original_event, enriched_event in zip(events, enriched):
+            if isinstance(enriched_event, Exception):
+                result.append(original_event)
+                continue
+            result.append(enriched_event)
+        return result
 
     async def _enrich_orgeo_event(
         self,
@@ -851,38 +858,41 @@ class OrgeoParser(CssDirectoryParser):
         ):
             return event
 
-        async with semaphore:
-            try:
-                response = await client.get(str(event.source_url))
-                response.raise_for_status()
-            except httpx.HTTPError:
-                return event
+        try:
+            async with semaphore:
+                try:
+                    response = await client.get(str(event.source_url))
+                    response.raise_for_status()
+                except httpx.HTTPError:
+                    return event
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        starts_at = event.starts_at or self._extract_optional_attr(
-            soup, '[itemprop="startDate"]', "content"
-        )
-        date_text = event.date_text or self._extract_orgeo_detail_date(soup)
-        region, city, venue = self._extract_orgeo_detail_location(soup)
-        organizer_name = self._extract_orgeo_organizer(soup)
-        registration_status, registration_deadline = self._extract_orgeo_registration_details(soup)
-        price_from = self._extract_orgeo_price(soup)
-        distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
+            soup = BeautifulSoup(response.text, "html.parser")
+            starts_at = event.starts_at or self._extract_optional_attr(
+                soup, '[itemprop="startDate"]', "content"
+            )
+            date_text = event.date_text or self._extract_orgeo_detail_date(soup)
+            region, city, venue = self._extract_orgeo_detail_location(soup)
+            organizer_name = self._extract_orgeo_organizer(soup)
+            registration_status, registration_deadline = self._extract_orgeo_registration_details(soup)
+            price_from = self._extract_orgeo_price(soup)
+            distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
 
-        return event.model_copy(
-            update={
-                "date_text": date_text or event.date_text,
-                "starts_at": starts_at or self._normalize_datetime(date_text),
-                "region": region or event.region,
-                "city": city or event.city,
-                "venue": venue or event.venue,
-                "organizer_name": organizer_name or event.organizer_name,
-                "registration_status": registration_status or event.registration_status,
-                "registration_deadline": registration_deadline or event.registration_deadline,
-                "price_from": price_from or event.price_from,
-                "distance_summary": distance_summary or event.distance_summary,
-            }
-        )
+            return event.model_copy(
+                update={
+                    "date_text": date_text or event.date_text,
+                    "starts_at": starts_at or self._normalize_datetime(date_text),
+                    "region": region or event.region,
+                    "city": city or event.city,
+                    "venue": venue or event.venue,
+                    "organizer_name": organizer_name or event.organizer_name,
+                    "registration_status": registration_status or event.registration_status,
+                    "registration_deadline": registration_deadline or event.registration_deadline,
+                    "price_from": price_from or event.price_from,
+                    "distance_summary": distance_summary or event.distance_summary,
+                }
+            )
+        except Exception:
+            return event
 
     def _extract_orgeo_detail_date(self, soup: BeautifulSoup) -> str | None:
         top_info = soup.select_one(".event_top_info")
