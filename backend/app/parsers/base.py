@@ -3158,7 +3158,8 @@ class NezhesteamParser(CssDirectoryParser):
         soup = BeautifulSoup(html, "html.parser")
         events: list[Event] = []
 
-        for index, card in enumerate(soup.select("#content .col-lg-4")):
+        cards = soup.select("#section-races .col-lg-4, #content .col-lg-4")
+        for index, card in enumerate(cards):
             title = self._extract_optional_text(card, "h3")
             date_text = self._extract_optional_text(card, "p.mb-4")
             href = self._extract_optional_attr(card, 'a[href*="race/?date="]', "href")

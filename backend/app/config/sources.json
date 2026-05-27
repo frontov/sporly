@@ -386,7 +386,7 @@
       "enabled": true,
       "parser_type": "nezhesteam",
       "selectors": {
-        "item": "#content .col-lg-4",
+        "item": "#section-races .col-lg-4, #content .col-lg-4",
         "title": "h3",
         "link": "a[href]"
       }
