@@ -879,16 +879,14 @@ class CatalogService:
         try:
             payload = json.loads(cache_file.read_text(encoding="utf-8"))
             cache_version = int(payload.get("version", 0))
+            if cache_version != settings.cache_version:
+                return
             items = payload.get("items", [])
             created_at = payload.get("created_at", 0.0)
             self._cache = self._normalize_events(
                 [Event.model_validate(item) for item in items]
             )
-            self._cache_created_at = (
-                float(created_at)
-                if cache_version == settings.cache_version
-                else 0.0
-            )
+            self._cache_created_at = float(created_at)
             if self._cache_created_at:
                 self._cache = self._apply_cache_metadata(self._cache, self._cache_created_at)
             self._cache_version = cache_version
