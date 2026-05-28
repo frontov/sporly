@@ -2874,7 +2874,7 @@ class OTimeCalendarParser(CssDirectoryParser):
         fallback: str | None,
     ) -> str | None:
         normalized = title.lower()
-        if any(token in normalized for token in ["вело", "bike", "mtb", "cycling"]):
+        if any(token in normalized for token in ["вело", "мтб", "bike", "mtb", "cycling", "xco", "xcm"]):
             return "Велоспорт"
         if any(token in normalized for token in ["лыж", "ski"]):
             return "Лыжи"
