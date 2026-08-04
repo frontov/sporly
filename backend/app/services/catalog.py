@@ -840,9 +840,17 @@ class CatalogService:
 
         return source_events
 
-    async def _refresh_cache(self) -> None:
+    async def force_refresh(self) -> None:
+        await self._refresh_cache(force=True)
+
+    def cache_age_seconds(self) -> float | None:
+        if not self._cache_created_at:
+            return None
+        return time.time() - self._cache_created_at
+
+    async def _refresh_cache(self, *, force: bool = False) -> None:
         async with self._refresh_lock:
-            if self._cache and not self._is_cache_stale():
+            if not force and self._cache and not self._is_cache_stale():
                 return
 
             collected_events = await self._collect_events()

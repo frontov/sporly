@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     )
     sources_file: Path = BASE_DIR / "config" / "sources.json"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    admin_token: str = ""
 
     @property
     def cors_origins_list(self) -> list[str]:

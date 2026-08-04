@@ -10,3 +10,4 @@ backend/.mypy_cache/
 frontend/node_modules/
 frontend/dist/
 backend/app/data/
+bot/app/data/

@@ -6,6 +6,7 @@
 
 - `backend/` - FastAPI + парсеры сайтов + JSON-кэш каталога.
 - `frontend/` - React + TypeScript + Vite.
+- `bot/` - Telegram-бот (aiogram) поверх API backend.
 - `docker-compose.yml` - production-ready локальный деплой через Docker Compose.
 
 ## Что умеет приложение
@@ -41,6 +42,44 @@ npm run dev
 
 Frontend будет доступен на `http://localhost:5173`.
 
+### Telegram-бот
+
+```bash
+cd bot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Заполните в `bot/.env`:
+
+- `BOT_TOKEN` - токен, выданный [@BotFather](https://t.me/BotFather);
+- `API_BASE_URL` - адрес backend, локально `http://localhost:8000`;
+- `ADMIN_TOKEN` - тот же секрет, что и `ADMIN_TOKEN` у backend (см. `backend/.env.example`), включает админ-команды бота;
+- `ADMIN_TELEGRAM_IDS` - ваш Telegram numeric ID (можно узнать у [@userinfobot](https://t.me/userinfobot)), через запятую для нескольких админов.
+
+Запуск:
+
+```bash
+python -m app.main
+```
+
+Бот работает через long polling, публичный HTTPS-эндпоинт не нужен.
+
+При первом `/start` бот предлагает кнопками выбрать любимые виды спорта и регионы (как фильтры на сайте). Внизу чата всегда висит меню (оно прикрепляется к каждому сообщению без своей инлайн-клавиатуры, поэтому не пропадает и не устаревает):
+
+- 🔍 Найти события - события по сохранённым фильтрам;
+- 🎯 Другие фильтры - разовый поиск с другими настройками, сохранённые не меняет;
+- ⭐ Избранное - сохранённые старты, отсортированные по близости даты, с обратным отсчётом и ссылкой «Убрать» у каждого;
+- ⚙️ Настройки - включить/выключить уведомления о новых стартах по фильтру, включить/выключить ежедневный дайджест, изменить фильтры, сбросить.
+
+Под каждым найденным событием с известной датой есть ссылка «⭐ Сохранить» - добавляет именно это событие в избранное. Бот пришлёт отдельное напоминание за 7, 3 и 1 день до его старта, независимо от фильтров и подписки на новые старты. Добавление и удаление подтверждаются сообщением со ссылкой отмены («✕ Убрать» / «↩ Вернуть в избранное»).
+
+Все действия с избранным - Telegram deep links вида `t.me/<bot>?start=fav_<токен>`, поэтому они остаются рабочими и в старых сообщениях, и после перезапуска бота (соответствие токен - событие хранится в `bot/app/data/event_tokens.json`).
+
+Также доступны команды (для обратной совместимости и текстового поиска): `/find <запрос>` - поиск по названию, `/browse`, `/subscribe`, `/my`. Админские `/status`, `/refresh` - только для `ADMIN_TELEGRAM_IDS`: статус кэша backend и принудительное обновление.
+
 ## Деплой через Docker Compose
 
 Самый простой production-сценарий:
@@ -60,7 +99,8 @@ docker compose up --build -d
 - frontend собирается в static bundle и отдается через `nginx`;
 - `nginx` проксирует `/api` в backend;
 - кэш каталога сохраняется в `backend/app/data`;
-- `sources.json` монтируется в контейнер backend как read-only.
+- `sources.json` монтируется в контейнер backend как read-only;
+- `bot` - опциональный сервис (нужен `BOT_TOKEN`), ходит в backend по внутренней сети (`http://backend:8000`), подписки хранит в `bot/app/data`.
 
 ## Деплой на реальный домен с HTTPS
 
@@ -139,12 +179,24 @@ sudo systemctl start sporly
 - `REQUEST_TIMEOUT_SECONDS`
 - `SOURCE_TIMEOUT_SECONDS`
 - `ENRICH_TIMEOUT_SECONDS`
+- `ADMIN_TOKEN` - секрет для `/api/admin/*`, используется ботом
 
 Для локальной разработки:
 
 ```bash
 cp backend/.env.example backend/.env
 ```
+
+## Переменные окружения бота
+
+Основные настройки лежат в `bot/.env.example`:
+
+- `BOT_TOKEN`
+- `API_BASE_URL`
+- `ADMIN_TOKEN`
+- `ADMIN_TELEGRAM_IDS`
+- `POLL_INTERVAL_SECONDS`
+- `DIGEST_HOUR_UTC`
 
 ## Источники
 

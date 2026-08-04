@@ -2,7 +2,7 @@ from datetime import datetime
 from html import escape
 import json
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
@@ -398,6 +398,39 @@ def _render_seo_page(
 @app.get("/api/health")
 async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def _require_admin(x_admin_token: str | None) -> None:
+    if not settings.admin_token or x_admin_token != settings.admin_token:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@app.get("/api/admin/status")
+async def admin_status(x_admin_token: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    available_cities, available_categories, available_sources = (
+        catalog_service.get_filter_metadata()
+    )
+    events = await catalog_service.get_events(filters=EventFilters())
+    return {
+        "is_loading": catalog_service.is_loading(),
+        "cache_age_seconds": catalog_service.cache_age_seconds(),
+        "total_events": len(events),
+        "available_sources": available_sources,
+        "available_cities_count": len(available_cities),
+        "available_categories_count": len(available_categories),
+    }
+
+
+@app.post("/api/admin/refresh")
+async def admin_refresh(x_admin_token: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    await catalog_service.force_refresh()
+    events = await catalog_service.get_events(filters=EventFilters())
+    return {
+        "total_events": len(events),
+        "cache_age_seconds": catalog_service.cache_age_seconds(),
+    }
 
 
 @app.get("/sitemap.xml")

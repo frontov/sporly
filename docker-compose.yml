@@ -10,6 +10,7 @@ services:
       API_PORT: 8000
       CORS_ORIGINS: http://localhost:8080
       CACHE_TTL_SECONDS: 300
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     volumes:
       - ./backend/app/data:/app/app/data
       - ./backend/app/config/sources.json:/app/app/config/sources.json:ro
@@ -25,3 +26,18 @@ services:
       - backend
     ports:
       - "8080:80"
+
+  bot:
+    build:
+      context: ./bot
+    container_name: sporly-bot
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      API_BASE_URL: http://backend:8000
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      ADMIN_TELEGRAM_IDS: ${ADMIN_TELEGRAM_IDS:-}
+    volumes:
+      - ./bot/app/data:/app/app/data

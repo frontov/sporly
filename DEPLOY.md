@@ -60,7 +60,7 @@ docker compose version
 ```bash
 mkdir -p /opt/sporly
 cd /opt/sporly
-git clone <YOUR_REPO_URL> .
+git clone git@github.com:frontov/sporly.git .
 ```
 
 Если git-репозитория нет, скопируйте проект в `/opt/sporly` любым удобным способом.
@@ -86,7 +86,14 @@ ENRICH_TIMEOUT_SECONDS=12
 MAX_CONCURRENT_SOURCES=2
 MAX_ENRICH_EVENTS_PER_SOURCE=120
 MINIMUM_REFRESH_RATIO=0.7
+
+# Telegram-бот (опционально, можно оставить пустым, если бот не нужен)
+BOT_TOKEN=
+ADMIN_TOKEN=
+ADMIN_TELEGRAM_IDS=
 ```
+
+Если `BOT_TOKEN` не задан, контейнер `bot` не запустится (упадёт с ошибкой конфигурации) - это нормально, если бот пока не нужен; остальной стек это не затрагивает.
 
 ## 6. Источники и данные
 
@@ -213,3 +220,4 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up --build -d
 - frontend проксирует `/api` в backend
 - backend работает внутри docker-сети
 - стек автоматически стартует после reboot
+
