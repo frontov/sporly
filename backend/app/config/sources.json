@@ -23,7 +23,8 @@
       "name": "Russialoppet",
       "base_url": "https://russialoppet.ru",
       "listing_urls": [
-        "https://russialoppet.ru/events/2026/"
+        "https://russialoppet.ru/events/2026/",
+        "https://russialoppet.ru/events/2027/"
       ],
       "enabled": true,
       "parser_type": "russialoppet",
