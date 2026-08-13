@@ -1262,12 +1262,16 @@ class CatalogService:
         ]
 
     def _detect_series(self, event: Event) -> tuple[str | None, str | None]:
+        # Strip the fragment: it can hold a disambiguation slug (e.g. Galtropa's
+        # page slug) that isn't part of the event's real identity and shouldn't
+        # be matched against series keywords.
+        source_url_without_fragment = str(event.source_url).split("#", 1)[0]
         haystack = " ".join(
             part
             for part in [
                 event.title,
                 event.description,
-                str(event.source_url),
+                source_url_without_fragment,
                 event.source_name,
             ]
             if part
