@@ -44,3 +44,23 @@ class EventsResponse(BaseModel):
     available_cities: list[str]
     available_categories: list[str]
     available_sources: list[str]
+
+
+class CalendarEvent(BaseModel):
+    id: str
+    title: str
+    city: str | None = None
+    region: str | None = None
+    category: str | None = None
+    date_text: str | None = None
+    starts_at: str | None = None
+    source_name: str
+    source_url: HttpUrl | str
+
+
+class CalendarEventsResponse(BaseModel):
+    items: list[CalendarEvent]
+    is_loading: bool = False
+    total: int
+    available_cities: list[str]
+    available_categories: list[str]

@@ -41,6 +41,31 @@ export type EventsResponse = {
   available_sources: string[];
 };
 
+export type CalendarEventItem = {
+  id: string;
+  title: string;
+  city: string | null;
+  region: string | null;
+  category: string | null;
+  date_text: string | null;
+  starts_at: string | null;
+  source_name: string;
+  source_url: string;
+};
+
+export type CalendarEventsResponse = {
+  items: CalendarEventItem[];
+  is_loading: boolean;
+  total: number;
+  available_cities: string[];
+  available_categories: string[];
+};
+
+export type CalendarFiltersState = {
+  cities: string[];
+  categories: string[];
+};
+
 export type FiltersState = {
   q: string;
   cities: string[];

@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { normalizeCategoryLabel } from "./categories";
+import { CalendarPage } from "./CalendarPage";
 import { EventCard } from "./components/EventCard";
 import { FiltersPanel } from "./components/FiltersPanel";
 import { useEvents } from "./hooks/useEvents";
+import { navigateLinkProps, useRoute } from "./hooks/useRoute";
+import { isPureRegionOption, popularRegionsOf, sortRegions } from "./regions";
 import { FiltersState } from "./types/events";
 
 const initialFilters: FiltersState = {
@@ -22,33 +25,6 @@ const initialFilters: FiltersState = {
 };
 
 const FILTERS_STORAGE_KEY = "sporly.filters";
-const isPureRegionOption = (value: string) => {
-  const normalized = value.trim();
-  if (!normalized || normalized.includes(",") || normalized.includes(" и ")) {
-    return false;
-  }
-
-  return (
-    /(область|край|республика|автономный округ)$/i.test(normalized) ||
-    normalized === "Москва" ||
-    normalized === "Санкт-Петербург" ||
-    normalized === "Севастополь"
-  );
-};
-const PINNED_REGIONS = [
-  "Москва",
-  "Московская область",
-  "Санкт-Петербург",
-  "Ленинградская область",
-  "Краснодарский край",
-  "Республика Татарстан",
-  "Свердловская область",
-  "Челябинская область",
-  "Самарская область",
-  "Нижегородская область",
-  "Тюменская область",
-  "Новосибирская область"
-];
 const FOOTER_CONTACTS = {
   email: "fronteno@yandex.ru",
   telegram: "https://t.me/fronteno"
@@ -109,17 +85,23 @@ const loadSavedFilters = (): FiltersState => {
 };
 
 function App() {
+  const { path } = useRoute();
+
+  if (path === "/calendar") {
+    return <CalendarPage />;
+  }
+
+  return <CatalogPage />;
+}
+
+function CatalogPage() {
+  const { navigate } = useRoute();
   const [filters, setFilters] = useState<FiltersState>(loadSavedFilters);
   const [page, setPage] = useState(1);
   const [filtersCloseSignal, setFiltersCloseSignal] = useState(0);
   const { data, loading, error } = useEvents(filters, page);
-  const availableRegions = data.available_cities
-    .filter(isPureRegionOption)
-    .sort((left, right) => left.localeCompare(right, "ru"));
-  const popularRegions = [
-    ...PINNED_REGIONS.filter((region) => availableRegions.includes(region)),
-    ...availableRegions.filter((region) => !PINNED_REGIONS.includes(region))
-  ].slice(0, 12);
+  const availableRegions = sortRegions(data.available_cities.filter(isPureRegionOption));
+  const popularRegions = popularRegionsOf(availableRegions);
   const resultsSummary = `${data.total} ${pluralize(data.total, "событие", "события", "событий")} • ${data.total_regions} ${pluralize(data.total_regions, "регион", "региона", "регионов")} • ${data.total_categories} ${pluralize(data.total_categories, "вид спорта", "вида спорта", "видов спорта")}`;
 
   useEffect(() => {
@@ -139,9 +121,16 @@ function App() {
   return (
     <div className="page-shell">
       <header className="hero">
-        <div className="hero__brand">
-          <img className="hero__logo" src="/logo-mark.svg" alt="" aria-hidden="true" />
-          <h1>sporly</h1>
+        <div className="hero__top">
+          <div className="hero__brand">
+            <img className="hero__logo" src="/logo-mark.svg" alt="" aria-hidden="true" />
+            <h1>sporly</h1>
+          </div>
+          <nav className="hero__nav">
+            <a className="hero__nav-link" {...navigateLinkProps("/calendar", navigate)}>
+              Календарь
+            </a>
+          </nav>
         </div>
         <p className="hero__brand-text">поиск спортивных событий</p>
       </header>

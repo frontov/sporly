@@ -7,7 +7,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
 
-from app.schemas.event import EventsResponse
+from app.schemas.event import CalendarEvent, CalendarEventsResponse, EventsResponse
 from app.services.catalog import CatalogService, EventFilters
 from app.settings import settings
 
@@ -208,6 +208,7 @@ def _build_event_schema(event: object) -> dict[str, object]:
 def _build_sitemap_xml(regions: list[str], categories: list[str]) -> str:
     urls = [
         ("https://sporly.ru/", "daily", "1.0"),
+        ("https://sporly.ru/calendar", "daily", "0.9"),
     ]
 
     for region in regions:
@@ -549,4 +550,36 @@ async def list_events(
         available_cities=available_cities,
         available_categories=available_categories,
         available_sources=available_sources,
+    )
+
+
+@app.get("/api/events/calendar", response_model=CalendarEventsResponse)
+async def list_events_calendar(
+    city: list[str] | None = Query(default=None),
+    category: list[str] | None = Query(default=None),
+) -> CalendarEventsResponse:
+    filters = EventFilters(cities=city, categories=category, sort_by="date_asc")
+    events = await catalog_service.get_events(filters=filters)
+    available_cities, available_categories, _ = catalog_service.get_filter_metadata()
+    items = [
+        CalendarEvent(
+            id=event.id,
+            title=event.title,
+            city=event.city,
+            region=event.region,
+            category=event.category,
+            date_text=event.date_text,
+            starts_at=event.starts_at,
+            source_name=event.source_name,
+            source_url=event.source_url,
+        )
+        for event in events
+        if event.starts_at
+    ]
+    return CalendarEventsResponse(
+        items=items,
+        is_loading=catalog_service.is_loading(),
+        total=len(items),
+        available_cities=available_cities,
+        available_categories=available_categories,
     )
