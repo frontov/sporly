@@ -1164,7 +1164,7 @@ class CatalogService:
         fragment_match = re.search(r"#(stage-\d+|event-\d+)$", normalized)
         if fragment_match:
             preserve_fragment = f"#{fragment_match.group(1).lower()}"
-        elif host_with_fragment in {"city-trail.ru", "www.city-trail.ru", "stradarace.ru", "www.stradarace.ru"} and fragment_value:
+        elif host_with_fragment in {"city-trail.ru", "www.city-trail.ru", "stradarace.ru", "www.stradarace.ru", "myrace.info", "www.myrace.info"} and fragment_value:
             preserve_fragment = f"#{fragment_value.lower()}"
 
         normalized = re.sub(r"#.*$", "", normalized)

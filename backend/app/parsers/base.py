@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from dateutil import parser as date_parser
@@ -3102,7 +3102,12 @@ class GaltropaParser(CssDirectoryParser):
         image_url = self._extract_optional_attr(soup, 'meta[property="og:image"]', "content")
         registration_url = self._extract_galtropa_registration_url(soup, page_url)
         full_link = registration_url or page_url
-        stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+        page_slug = urlparse(page_url).path.strip("/").split("/")[-1]
+        # Different Galtropa pages (e.g. city-marathon vs velomarathon) can share the
+        # same myrace.info registration link for a multi-format event with distinct
+        # dates, so the page slug disambiguates them for dedup/id purposes.
+        disambiguated_link = f"{full_link}#{page_slug}" if registration_url and page_slug else full_link
+        stable_hash = hashlib.sha1(disambiguated_link.encode("utf-8")).hexdigest()[:12]
 
         return [
             Event(
@@ -3117,7 +3122,7 @@ class GaltropaParser(CssDirectoryParser):
                 date_text=date_text,
                 starts_at=self._normalize_datetime(date_text),
                 source_name=self.config.name,
-                source_url=full_link,
+                source_url=disambiguated_link,
                 image_url=image_url,
             )
         ]
