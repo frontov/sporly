@@ -1,4 +1,6 @@
+import { ReactNode } from "react";
 import { slugifyCategory } from "../categories";
+import { buildMonthGrid, groupEventsByDay, MONTH_LABELS, startOfMonth, toDayKey, WEEKDAY_LABELS } from "../calendarUtils";
 import { CalendarEventItem } from "../types/events";
 
 type CalendarViewProps = {
@@ -7,46 +9,7 @@ type CalendarViewProps = {
   selectedDay: string | null;
   onMonthChange: (nextMonth: Date) => void;
   onSelectDay: (day: string | null) => void;
-};
-
-const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-const MONTH_LABELS = [
-  "Январь",
-  "Февраль",
-  "Март",
-  "Апрель",
-  "Май",
-  "Июнь",
-  "Июль",
-  "Август",
-  "Сентябрь",
-  "Октябрь",
-  "Ноябрь",
-  "Декабрь"
-];
-
-const toDayKey = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const startOfMonth = (month: Date) => new Date(month.getFullYear(), month.getMonth(), 1);
-
-const buildMonthGrid = (month: Date) => {
-  const first = startOfMonth(month);
-  const firstWeekday = (first.getDay() + 6) % 7;
-  const gridStart = new Date(first);
-  gridStart.setDate(gridStart.getDate() - firstWeekday);
-
-  const days: Date[] = [];
-  for (let i = 0; i < 42; i += 1) {
-    const day = new Date(gridStart);
-    day.setDate(gridStart.getDate() + i);
-    days.push(day);
-  }
-  return days;
+  viewToggle?: ReactNode;
 };
 
 export const CalendarView = ({
@@ -54,22 +17,10 @@ export const CalendarView = ({
   events,
   selectedDay,
   onMonthChange,
-  onSelectDay
+  onSelectDay,
+  viewToggle
 }: CalendarViewProps) => {
-  const eventsByDay = new Map<string, CalendarEventItem[]>();
-  for (const event of events) {
-    if (!event.starts_at) {
-      continue;
-    }
-    const key = event.starts_at.slice(0, 10);
-    const bucket = eventsByDay.get(key);
-    if (bucket) {
-      bucket.push(event);
-    } else {
-      eventsByDay.set(key, [event]);
-    }
-  }
-
+  const eventsByDay = groupEventsByDay(events);
   const days = buildMonthGrid(month);
   const todayKey = toDayKey(new Date());
   const currentMonthIndex = month.getMonth();
@@ -103,6 +54,7 @@ export const CalendarView = ({
         >
           Сегодня
         </button>
+        {viewToggle}
       </div>
 
       <div className="calendar-view__weekdays">
@@ -166,5 +118,3 @@ export const CalendarView = ({
     </div>
   );
 };
-
-export { toDayKey, startOfMonth };

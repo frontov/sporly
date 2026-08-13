@@ -1699,6 +1699,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  flex: 1;
   min-width: 0;
 }
 
@@ -1769,6 +1770,34 @@ code {
   font-weight: 700;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.calendar-view-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(245, 247, 242, 1);
+  flex-shrink: 0;
+}
+
+.calendar-view-toggle__option {
+  border: none;
+  background: transparent;
+  color: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0 14px;
+  min-height: 30px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendar-view-toggle__option--active {
+  background: var(--brand);
+  color: var(--brand-deep);
 }
 
 .calendar-view__weekdays {
@@ -1945,6 +1974,92 @@ code {
 .calendar-day-panel__meta {
   font-size: 0.78rem;
   color: var(--text-muted);
+}
+
+.calendar-year-view__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 20px;
+}
+
+.calendar-mini-month {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calendar-mini-month__title {
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--accent);
+  text-transform: capitalize;
+}
+
+.calendar-mini-month__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.calendar-mini-month__weekdays span {
+  text-align: center;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+.calendar-mini-month__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.calendar-mini-day {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 0.68rem;
+  color: var(--accent);
+  cursor: default;
+  padding: 0;
+}
+
+.calendar-mini-day--muted {
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.calendar-mini-day--heat-1,
+.calendar-mini-day--heat-2,
+.calendar-mini-day--heat-3 {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.calendar-mini-day--heat-1 {
+  background: rgba(201, 239, 115, 0.35);
+}
+
+.calendar-mini-day--heat-2 {
+  background: rgba(201, 239, 115, 0.65);
+}
+
+.calendar-mini-day--heat-3 {
+  background: var(--brand);
+  color: var(--brand-deep);
+}
+
+.calendar-mini-day--today {
+  border-color: var(--brand-deep);
+}
+
+.calendar-mini-day--selected {
+  outline: 2px solid var(--brand-deep);
+  outline-offset: 1px;
 }
 
 @media (min-width: 768px) {

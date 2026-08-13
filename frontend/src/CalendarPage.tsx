@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import { startOfMonth } from "./calendarUtils";
 import { slugifyCategory } from "./categories";
 import { CalendarFilters } from "./components/CalendarFilters";
-import { CalendarView, startOfMonth } from "./components/CalendarView";
+import { CalendarView } from "./components/CalendarView";
+import { CalendarYearView } from "./components/CalendarYearView";
 import { useCalendarEvents } from "./hooks/useCalendarEvents";
+import { useIsDesktop } from "./hooks/useIsDesktop";
 import { navigateLinkProps, useRoute } from "./hooks/useRoute";
 import { isPureRegionOption, popularRegionsOf, sortRegions } from "./regions";
 import { CalendarFiltersState } from "./types/events";
+
+type ViewMode = "month" | "year";
 
 const CALENDAR_FILTERS_STORAGE_KEY = "sporly.calendarFilters";
 
@@ -35,10 +40,32 @@ const loadSavedFilters = (): CalendarFiltersState => {
 
 export const CalendarPage = () => {
   const { navigate } = useRoute();
+  const isDesktop = useIsDesktop();
   const [filters, setFilters] = useState<CalendarFiltersState>(loadSavedFilters);
   const [month, setMonth] = useState<Date>(() => startOfMonth(new Date()));
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const { data, loading, error } = useCalendarEvents(filters);
+  const effectiveViewMode: ViewMode = isDesktop ? viewMode : "month";
+
+  const viewToggle = isDesktop ? (
+    <div className="calendar-view-toggle" role="group" aria-label="Режим отображения">
+      <button
+        type="button"
+        className={`calendar-view-toggle__option${effectiveViewMode === "month" ? " calendar-view-toggle__option--active" : ""}`}
+        onClick={() => setViewMode("month")}
+      >
+        Месяц
+      </button>
+      <button
+        type="button"
+        className={`calendar-view-toggle__option${effectiveViewMode === "year" ? " calendar-view-toggle__option--active" : ""}`}
+        onClick={() => setViewMode("year")}
+      >
+        Год
+      </button>
+    </div>
+  ) : null;
 
   useEffect(() => {
     window.localStorage.setItem(CALENDAR_FILTERS_STORAGE_KEY, JSON.stringify(filters));
@@ -116,13 +143,25 @@ export const CalendarPage = () => {
 
           {!loading && !error ? (
             <>
-              <CalendarView
-                month={month}
-                events={data.items}
-                selectedDay={selectedDay}
-                onMonthChange={setMonth}
-                onSelectDay={setSelectedDay}
-              />
+              {effectiveViewMode === "year" ? (
+                <CalendarYearView
+                  year={month.getFullYear()}
+                  events={data.items}
+                  selectedDay={selectedDay}
+                  onYearChange={(nextYear) => setMonth(new Date(nextYear, month.getMonth(), 1))}
+                  onSelectDay={setSelectedDay}
+                  viewToggle={viewToggle}
+                />
+              ) : (
+                <CalendarView
+                  month={month}
+                  events={data.items}
+                  selectedDay={selectedDay}
+                  onMonthChange={setMonth}
+                  onSelectDay={setSelectedDay}
+                  viewToggle={viewToggle}
+                />
+              )}
 
               {selectedDay ? (
                 <section className="calendar-day-panel">
