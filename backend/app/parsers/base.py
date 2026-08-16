@@ -121,6 +121,66 @@ class CssDirectoryParser:
                 break
         return urls
 
+    # Hosts already scraped as their own dedicated source. Aggregator/meta sites
+    # (get.run, bike-events.ru, ...) often just link out to one of these for
+    # registration; when they do, that link is used as the event's source_url
+    # instead of the aggregator's own page so the existing canonical-URL dedup
+    # in CatalogService recognizes it as the same event rather than a duplicate.
+    KNOWN_REGISTRATION_HOSTS = (
+        "reg.place",
+        "russialoppet.ru",
+        "russiarunning.com",
+        "orgeo.ru",
+        "runc.run",
+        "arta-sport.ru",
+        "cup.marzocchi.ru",
+        "granfondo.ru",
+        "cyclingrace.ru",
+        "city-trail.ru",
+        "o-time.ru",
+        "marathoncup.ru",
+        "myrace.info",
+        "racetime.online",
+        "iron-star.com",
+        "lastradarace.ru",
+        "goldenultra.ru",
+        "arf.by",
+        "sportident.online",
+        "swimcup.ru",
+        "velogearance.ru",
+        "velomarathon.ru",
+        "xcnews.ru",
+        "x-waters.com",
+        "galtropa.ru",
+        "nezhesteam.ru",
+        "borisovo.club",
+    )
+
+    def _extract_known_registration_url(self, soup: BeautifulSoup, page_url: str) -> str | None:
+        # A bare-domain link (no path) is almost always a generic "organized by"
+        # credit rather than a link to this specific event, and using it as
+        # source_url would wrongly collapse unrelated events that share an
+        # organizer onto one canonical URL. Only trust links with a real path,
+        # preferring ones explicitly labeled as registration.
+        with_path: list[str] = []
+        for link in soup.select("a[href]"):
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
+            full_url = urljoin(page_url, href)
+            parsed = urlparse(full_url)
+            host = parsed.netloc.lower()
+            if host.startswith("www."):
+                host = host[4:]
+            if not any(host == known or host.endswith(f".{known}") for known in self.KNOWN_REGISTRATION_HOSTS):
+                continue
+            if not parsed.path.strip("/"):
+                continue
+            if "регистра" in link.get_text(strip=True).lower():
+                return full_url
+            with_path.append(full_url)
+        return with_path[0] if with_path else None
+
     def _extract_text(self, node: Any, selector: str) -> str | None:
         element = node.select_one(selector)
         if not element:
@@ -5072,3 +5132,381 @@ class XCNewsParser(CssDirectoryParser):
         if any(token in combined for token in ("xco", "xcm", "xcc", "mtb", "вело", "кросс-кантри")):
             return "Велоспорт"
         return "Другие"
+
+
+class GetRunParser(CssDirectoryParser):
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        events: list[Event] = []
+        for listing_url in self.config.listing_urls:
+            try:
+                response = await client.get(listing_url)
+                response.raise_for_status()
+                payload = response.json()
+            except (httpx.HTTPError, ValueError):
+                continue
+            events.extend(self._parse_getrun_payload(payload))
+        return events
+
+    def _parse_getrun_payload(self, payload: Any) -> list[Event]:
+        items = payload.get("ITEMS") if isinstance(payload, dict) else None
+        if not isinstance(items, dict):
+            return []
+
+        events: list[Event] = []
+        for index, item in enumerate(items.values()):
+            if not isinstance(item, dict):
+                continue
+
+            title = item.get("NAME")
+            detail_url = item.get("DETAIL_PAGE_URL")
+            date_text = item.get("DATE_FORMAT")
+            if not title or not detail_url or not date_text:
+                continue
+
+            distances = item.get("DISTANCES")
+            distance_summary = " • ".join(distances) if isinstance(distances, list) and distances else None
+            stable_hash = hashlib.sha1(str(detail_url).encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"getrun-{index}-{stable_hash}",
+                    title=title,
+                    description=item.get("RACE_TYPES") or None,
+                    distance_summary=distance_summary,
+                    city=item.get("SECTION_NAME") or None,
+                    category="Бег",
+                    date_text=date_text,
+                    starts_at=self._normalize_datetime(date_text),
+                    source_name=self.config.name,
+                    source_url=detail_url,
+                    image_url=item.get("PREVIEW_PICTURE") or None,
+                )
+            )
+        return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_getrun_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_getrun_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        known_url = self._extract_known_registration_url(soup, str(event.source_url))
+        if known_url:
+            return event.model_copy(update={"source_url": known_url})
+        return event
+
+
+class BikeEventsParser(CssDirectoryParser):
+    MONTHS_RU = {
+        "январь": 1,
+        "февраль": 2,
+        "март": 3,
+        "апрель": 4,
+        "май": 5,
+        "июнь": 6,
+        "июль": 7,
+        "август": 8,
+        "сентябрь": 9,
+        "октябрь": 10,
+        "ноябрь": 11,
+        "декабрь": 12,
+    }
+
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        events: list[Event] = []
+        seen_urls: set[str] = set()
+        for listing_url in self.config.listing_urls:
+            try:
+                response = await client.get(listing_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+
+            html = response.content.decode("windows-1251", errors="ignore")
+            for event in self.parse(html, str(response.url)):
+                if str(event.source_url) in seen_urls:
+                    continue
+                seen_urls.add(str(event.source_url))
+                events.append(event)
+
+        return events
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        table = soup.select_one("table.fixedslimline")
+        if not table:
+            return []
+
+        year_match = re.search(r"season=S(\d{4})", page_url)
+        year = int(year_match.group(1)) if year_match else datetime.now().year
+
+        events: list[Event] = []
+        current_month: int | None = None
+        index = 0
+
+        for row in table.select("tr"):
+            classes = row.get("class") or []
+            if "row0" in classes:
+                label = row.get_text(strip=True).lower()
+                month_number = self.MONTHS_RU.get(label)
+                if month_number:
+                    if current_month is not None and month_number < current_month:
+                        year += 1
+                    current_month = month_number
+                continue
+
+            if "row1" not in classes or current_month is None:
+                continue
+
+            cells = row.select("td")
+            if len(cells) < 3:
+                continue
+
+            day_match = re.match(r"\d+", cells[0].get_text(strip=True))
+            if not day_match:
+                continue
+
+            title_link = next(
+                (
+                    candidate
+                    for candidate in cells[1].select('a[href*="race.php?race="]')
+                    if candidate.get_text(strip=True)
+                ),
+                None,
+            )
+            if not title_link:
+                continue
+
+            title = title_link.get_text(strip=True)
+            href = title_link.get("href")
+            if not title or not isinstance(href, str):
+                continue
+
+            try:
+                starts_at = datetime(year, current_month, int(day_match.group()))
+            except ValueError:
+                continue
+
+            location_links = cells[2].select("a")
+            city = location_links[0].get_text(strip=True) if location_links else None
+            region = location_links[1].get_text(strip=True) if len(location_links) > 1 else None
+            if location_links and region is None:
+                region = city
+                city = None
+
+            full_link = urljoin(page_url, href)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"bikeevents-{index}-{stable_hash}",
+                    title=title,
+                    description=self._extract_optional_text(cells[1], "span.smalltext"),
+                    city=city,
+                    region=region,
+                    category="Велоспорт",
+                    date_text=starts_at.strftime("%d.%m.%Y"),
+                    starts_at=starts_at.isoformat(),
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=None,
+                )
+            )
+            index += 1
+
+        return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_bikeevents_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_bikeevents_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        html = response.content.decode("windows-1251", errors="ignore")
+        soup = BeautifulSoup(html, "html.parser")
+        known_url = self._extract_known_registration_url(soup, str(event.source_url))
+        if known_url:
+            return event.model_copy(update={"source_url": known_url})
+        return event
+
+
+class GravelSeriesParser(CssDirectoryParser):
+    SOCIAL_HOSTS = {"t.me", "vk.com", "youtube.com", "www.youtube.com"}
+
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        events: list[Event] = []
+        for listing_url in self.config.listing_urls:
+            try:
+                response = await client.get(listing_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+            events.extend(self.parse(response.text, str(response.url)))
+        return events
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        article = soup.select_one("article")
+        if not article:
+            return []
+
+        headings = article.find_all("h2")
+        stage_section_start = None
+        stage_section_end = None
+        for heading in headings:
+            text = heading.get_text(strip=True).lower()
+            if stage_section_start is None:
+                if "этап" in text:
+                    stage_section_start = heading
+                continue
+            stage_section_end = heading
+            break
+
+        if stage_section_start is None:
+            return []
+
+        events: list[Event] = []
+        state: dict[str, Any] = {"title": None, "date_text": None, "region": None, "links": []}
+
+        def flush(index: int) -> Event | None:
+            title = state["title"]
+            date_text = state["date_text"]
+            links = state["links"]
+            if not title or not date_text or not links:
+                return None
+            starts_at = self._parse_gravel_series_date(date_text)
+            if not starts_at:
+                return None
+            link_url = self._pick_gravel_series_link(links)
+            if not link_url:
+                return None
+            stable_hash = hashlib.sha1(link_url.encode("utf-8")).hexdigest()[:12]
+            return Event(
+                id=f"gravelseries-{index}-{stable_hash}",
+                title=title,
+                description="Русская Гравийная Серия",
+                city=None,
+                region=state["region"],
+                category="Велоспорт",
+                date_text=starts_at.strftime("%d.%m.%Y"),
+                starts_at=starts_at.isoformat(),
+                source_name=self.config.name,
+                source_url=link_url,
+                image_url=None,
+            )
+
+        node = stage_section_start.find_next_sibling()
+        while node and node is not stage_section_end:
+            if getattr(node, "name", None) == "p":
+                strong = node.select_one("strong")
+                if strong:
+                    event = flush(len(events))
+                    if event:
+                        events.append(event)
+                    header_text = strong.get_text(" ", strip=True)
+                    title_part, _, rest = header_text.partition("—")
+                    date_part, _, location_part = rest.partition(",")
+                    if not location_part.strip():
+                        # Not every stage header has a comma before the location
+                        # (e.g. "FURY ROAD — 14-16.08.2026 Ленобласть"),
+                        # so fall back to stripping the leading date-like prefix.
+                        location_part = re.sub(r"^[\d.\-–\s]+", "", date_part)
+                    region = re.sub(r"\s*\([^)]*\)\s*$", "", location_part).strip()
+                    state = {
+                        "title": title_part.strip() or None,
+                        "date_text": date_part.strip() or None,
+                        "region": region or None,
+                        "links": [],
+                    }
+                else:
+                    for link in node.select("a[href]"):
+                        href = link.get("href")
+                        if isinstance(href, str):
+                            state["links"].append(urljoin(page_url, href))
+            node = node.find_next_sibling()
+
+        event = flush(len(events))
+        if event:
+            events.append(event)
+
+        return events
+
+    def _parse_gravel_series_date(self, text: str) -> datetime | None:
+        cross_month = re.search(
+            r"(\d{1,2})\.(\d{1,2})\s*[-–]\s*(\d{1,2})\.(\d{1,2})\.(\d{4})", text
+        )
+        if cross_month:
+            day, month, year = (
+                int(cross_month.group(1)),
+                int(cross_month.group(2)),
+                int(cross_month.group(5)),
+            )
+        else:
+            same_month = re.search(r"(\d{1,2})\s*[-–]\s*(\d{1,2})\.(\d{1,2})\.(\d{4})", text)
+            if same_month:
+                day, month, year = (
+                    int(same_month.group(1)),
+                    int(same_month.group(3)),
+                    int(same_month.group(4)),
+                )
+            else:
+                single = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", text)
+                if not single:
+                    return None
+                day, month, year = (
+                    int(single.group(1)),
+                    int(single.group(2)),
+                    int(single.group(3)),
+                )
+        try:
+            return datetime(year, month, day)
+        except ValueError:
+            return None
+
+    def _pick_gravel_series_link(self, links: list[str]) -> str | None:
+        for url in links:
+            host = urlparse(url).netloc.lower()
+            if host not in self.SOCIAL_HOSTS:
+                return url
+        return links[0] if links else None

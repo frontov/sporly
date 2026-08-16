@@ -405,6 +405,48 @@
         "title": ".entry-title",
         "link": ".entry-title a"
       }
+    },
+    {
+      "name": "Get.run",
+      "base_url": "https://get.run",
+      "listing_urls": [
+        "https://get.run/crone/test.json"
+      ],
+      "enabled": true,
+      "parser_type": "getrun",
+      "selectors": {
+        "item": "body",
+        "title": "body",
+        "link": "a"
+      }
+    },
+    {
+      "name": "Bike-Events",
+      "base_url": "https://www.bike-events.ru",
+      "listing_urls": [
+        "https://www.bike-events.ru/index.php?season=S2026"
+      ],
+      "enabled": true,
+      "parser_type": "bike_events",
+      "selectors": {
+        "item": "tr.row1",
+        "title": "a[href*=\"race.php\"]",
+        "link": "a[href*=\"race.php\"]"
+      }
+    },
+    {
+      "name": "Русская Гравийная Серия",
+      "base_url": "https://velo.gravelo.ru",
+      "listing_urls": [
+        "https://velo.gravelo.ru/russkaya-gravijnaya-seriya-2026/"
+      ],
+      "enabled": true,
+      "parser_type": "gravel_series",
+      "selectors": {
+        "item": "article p",
+        "title": "strong",
+        "link": "a"
+      }
     }
   ]
 }

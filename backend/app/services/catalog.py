@@ -15,12 +15,15 @@ import httpx
 from app.parsers.base import (
     ArtaSportParser,
     ArfCalendarParser,
+    BikeEventsParser,
     CyclingRaceParser,
     CssDirectoryParser,
     CityTrailParser,
     GaltropaParser,
+    GetRunParser,
     GoldenUltraParser,
     GranFondoParser,
+    GravelSeriesParser,
     IronStarParser,
     BorisovoParser,
     LaStradaParser,
@@ -1008,6 +1011,12 @@ class CatalogService:
             return RussialoppetParser(source_config)
         if source_config.parser_type == "russiarunning_series":
             return RussiaRunningSeriesParser(source_config)
+        if source_config.parser_type == "getrun":
+            return GetRunParser(source_config)
+        if source_config.parser_type == "bike_events":
+            return BikeEventsParser(source_config)
+        if source_config.parser_type == "gravel_series":
+            return GravelSeriesParser(source_config)
         return CssDirectoryParser(source_config)
 
     def _load_source_configs(self, config_path: Path) -> list[SourceConfig]:
