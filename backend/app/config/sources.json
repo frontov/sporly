@@ -86,13 +86,13 @@
       "name": "Arta Sport",
       "base_url": "https://arta-sport.ru",
       "listing_urls": [
-        "https://arta-sport.ru"
+        "https://arta-sport.ru/predstoyaschie-meropriyatiya/"
       ],
       "enabled": true,
       "parser_type": "arta_sport",
       "selectors": {
-        "item": "ul.bl_mer > li.item",
-        "title": ".caption",
+        "item": "div.event_item",
+        "title": ".name",
         "link": "a[href]:not(.reg_btn)",
         "date": ".data",
         "venue": ".adr"

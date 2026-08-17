@@ -1969,7 +1969,12 @@ class ArtaSportParser(CssDirectoryParser):
         soup = BeautifulSoup(html, "html.parser")
         events: list[Event] = []
 
-        for index, item in enumerate(soup.select("ul.bl_mer > li.item")):
+        # The homepage only ever shows the next few events via
+        # "ul.bl_mer > li.item" / ".caption"; the full listing at
+        # /predstoyaschie-meropriyatiya/ uses "div.event_item" / ".name" instead.
+        containers = soup.select("div.event_item") or soup.select("ul.bl_mer > li.item")
+
+        for index, item in enumerate(containers):
             detail_link = item.select_one("a[href]:not(.reg_btn)")
             if detail_link is None:
                 continue
@@ -1978,7 +1983,7 @@ class ArtaSportParser(CssDirectoryParser):
             if not isinstance(href, str):
                 continue
 
-            title = self._extract_text(item, ".caption")
+            title = self._extract_text(item, ".name") or self._extract_text(item, ".caption")
             date_text = self._extract_text(item, ".data")
             venue = self._extract_text(item, ".adr")
             image_url = self._extract_image_from_style(item.select_one(".pic"))
