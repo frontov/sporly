@@ -13,6 +13,21 @@ import { CalendarFiltersState } from "./types/events";
 type ViewMode = "month" | "year";
 
 const CALENDAR_FILTERS_STORAGE_KEY = "sporly.calendarFilters";
+const DAY_PARAM = "day";
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const readDayFromUrl = (): string | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const value = new URLSearchParams(window.location.search).get(DAY_PARAM);
+  return value && DAY_PATTERN.test(value) ? value : null;
+};
+
+const monthFromDayKey = (dayKey: string): Date => {
+  const [year, month] = dayKey.split("-").map(Number);
+  return new Date(year, month - 1, 1);
+};
 
 const initialFilters: CalendarFiltersState = {
   cities: [],
@@ -42,9 +57,13 @@ export const CalendarPage = () => {
   const { navigate } = useRoute();
   const isDesktop = useIsDesktop();
   const [filters, setFilters] = useState<CalendarFiltersState>(loadSavedFilters);
-  const [month, setMonth] = useState<Date>(() => startOfMonth(new Date()));
+  const [selectedDay, setSelectedDay] = useState<string | null>(readDayFromUrl);
+  const [month, setMonth] = useState<Date>(() => {
+    const initialDay = readDayFromUrl();
+    return initialDay ? monthFromDayKey(initialDay) : startOfMonth(new Date());
+  });
   const [viewMode, setViewMode] = useState<ViewMode>("month");
-  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const { data, loading, error } = useCalendarEvents(filters);
   const effectiveViewMode: ViewMode = isDesktop ? viewMode : "month";
 
@@ -71,9 +90,34 @@ export const CalendarPage = () => {
     window.localStorage.setItem(CALENDAR_FILTERS_STORAGE_KEY, JSON.stringify(filters));
   }, [filters]);
 
-  useEffect(() => {
+  const changeFilters = (next: CalendarFiltersState) => {
+    setFilters(next);
     setSelectedDay(null);
-  }, [filters, month]);
+  };
+
+  const changeMonth = (nextMonth: Date) => {
+    setMonth(nextMonth);
+    setSelectedDay(null);
+  };
+
+  const changeYear = (nextYear: number) => {
+    setMonth((current) => new Date(nextYear, current.getMonth(), 1));
+    setSelectedDay(null);
+  };
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (selectedDay) {
+      url.searchParams.set(DAY_PARAM, selectedDay);
+    } else {
+      url.searchParams.delete(DAY_PARAM);
+    }
+    window.history.replaceState({}, "", url);
+  }, [selectedDay]);
+
+  useEffect(() => {
+    setCopyState("idle");
+  }, [selectedDay]);
 
   const availableRegions = sortRegions(data.available_cities.filter(isPureRegionOption));
   const popularRegions = popularRegionsOf(availableRegions);
@@ -94,6 +138,15 @@ export const CalendarPage = () => {
         year: "numeric"
       })
     : null;
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopyState("copied");
+    } catch {
+      setCopyState("idle");
+    }
+  };
 
   return (
     <div className="page-shell">
@@ -117,8 +170,8 @@ export const CalendarPage = () => {
           filters={filters}
           regions={availableRegions}
           popularRegions={popularRegions}
-          onChange={setFilters}
-          onReset={() => setFilters(initialFilters)}
+          onChange={changeFilters}
+          onReset={() => changeFilters(initialFilters)}
         />
 
         <div className="calendar-page__content">
@@ -148,7 +201,7 @@ export const CalendarPage = () => {
                   year={month.getFullYear()}
                   events={data.items}
                   selectedDay={selectedDay}
-                  onYearChange={(nextYear) => setMonth(new Date(nextYear, month.getMonth(), 1))}
+                  onYearChange={changeYear}
                   onSelectDay={setSelectedDay}
                   viewToggle={viewToggle}
                 />
@@ -157,7 +210,7 @@ export const CalendarPage = () => {
                   month={month}
                   events={data.items}
                   selectedDay={selectedDay}
-                  onMonthChange={setMonth}
+                  onMonthChange={changeMonth}
                   onSelectDay={setSelectedDay}
                   viewToggle={viewToggle}
                 />
@@ -167,32 +220,47 @@ export const CalendarPage = () => {
                 <section className="calendar-day-panel">
                   <div className="calendar-day-panel__head">
                     <h2>{selectedDayLabel}</h2>
-                    <button
-                      type="button"
-                      className="calendar-day-panel__close"
-                      onClick={() => setSelectedDay(null)}
-                      aria-label="Закрыть"
-                    >
-                      ×
-                    </button>
+                    <div className="calendar-day-panel__actions">
+                      <button
+                        type="button"
+                        className="calendar-day-panel__share"
+                        onClick={handleCopyLink}
+                      >
+                        {copyState === "copied" ? "Ссылка скопирована" : "Скопировать ссылку"}
+                      </button>
+                      <button
+                        type="button"
+                        className="calendar-day-panel__close"
+                        onClick={() => setSelectedDay(null)}
+                        aria-label="Закрыть"
+                      >
+                        ×
+                      </button>
+                    </div>
                   </div>
-                  <ul className="calendar-day-panel__list">
-                    {selectedDayEvents.map((event) => (
-                      <li key={event.id} className="calendar-day-panel__item">
-                        <a
-                          href={event.source_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`calendar-day-panel__link category-chip--${slugifyCategory(event.category)}`}
-                        >
-                          {event.title}
-                        </a>
-                        <span className="calendar-day-panel__meta">
-                          {[event.category, event.city].filter(Boolean).join(" • ")}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  {selectedDayEvents.length > 0 ? (
+                    <ul className="calendar-day-panel__list">
+                      {selectedDayEvents.map((event) => (
+                        <li key={event.id} className="calendar-day-panel__item">
+                          <a
+                            href={event.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`calendar-day-panel__link category-chip--${slugifyCategory(event.category)}`}
+                          >
+                            {event.title}
+                          </a>
+                          <span className="calendar-day-panel__meta">
+                            {[event.category, event.city].filter(Boolean).join(" • ")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="calendar-day-panel__empty">
+                      На эту дату событий не найдено{filters.cities.length || filters.categories.length ? " с текущими фильтрами" : ""}.
+                    </p>
+                  )}
                 </section>
               ) : null}
             </>
