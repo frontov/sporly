@@ -750,7 +750,11 @@ class RegPlaceParser(CssDirectoryParser):
         if not text:
             return None
         category_patterns = [
-            (r"\bвеломарафон\b|\bвелогонк|\bmtb\b|\bgravel\b|\bвелокросс\b", "Велоспорт"),
+            (
+                r"\bвеломарафон\b|\bвелогонк|\bmtb\b|\bgravel\b|\bвелокросс\b"
+                r"|\bмаунтинбайк|\bмтб\b|\bxco\b|\bxcm\b|кросс-кантри",
+                "Велоспорт",
+            ),
             (r"\bзабег\b|\bбег\b|\bтрейл\b|\bкросс\b|\bмарафон\b|\bполумарафон\b", "Бег"),
             (r"\bплаван", "Плавание"),
             (r"\bлыж", "Лыжи"),
@@ -4300,10 +4304,10 @@ class BorisovoParser(CssDirectoryParser):
         text = f"{title} {description or ''}".casefold()
         if "лыж" in text:
             return "Лыжи"
-        if "trail" in text or "трейл" in text or "кросс" in text:
-            return "Бег"
         if "вело" in text or "xcm" in text:
             return "Велоспорт"
+        if "trail" in text or "трейл" in text or "кросс" in text:
+            return "Бег"
         return "Другие"
 
 
