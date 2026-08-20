@@ -14,6 +14,8 @@ type ViewMode = "month" | "year";
 
 const CALENDAR_FILTERS_STORAGE_KEY = "sporly.calendarFilters";
 const DAY_PARAM = "day";
+const CITY_PARAM = "city";
+const CATEGORY_PARAM = "category";
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const readDayFromUrl = (): string | null => {
@@ -22,6 +24,20 @@ const readDayFromUrl = (): string | null => {
   }
   const value = new URLSearchParams(window.location.search).get(DAY_PARAM);
   return value && DAY_PATTERN.test(value) ? value : null;
+};
+
+const readFiltersFromUrl = (): CalendarFiltersState | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has(CITY_PARAM) && !params.has(CATEGORY_PARAM)) {
+    return null;
+  }
+  return {
+    cities: params.getAll(CITY_PARAM),
+    categories: params.getAll(CATEGORY_PARAM)
+  };
 };
 
 const monthFromDayKey = (dayKey: string): Date => {
@@ -56,7 +72,7 @@ const loadSavedFilters = (): CalendarFiltersState => {
 export const CalendarPage = () => {
   const { navigate } = useRoute();
   const isDesktop = useIsDesktop();
-  const [filters, setFilters] = useState<CalendarFiltersState>(loadSavedFilters);
+  const [filters, setFilters] = useState<CalendarFiltersState>(() => readFiltersFromUrl() ?? loadSavedFilters());
   const [selectedDay, setSelectedDay] = useState<string | null>(readDayFromUrl);
   const [month, setMonth] = useState<Date>(() => {
     const initialDay = readDayFromUrl();
@@ -107,13 +123,17 @@ export const CalendarPage = () => {
 
   useEffect(() => {
     const url = new URL(window.location.href);
+    const params = url.searchParams;
+    params.delete(DAY_PARAM);
+    params.delete(CITY_PARAM);
+    params.delete(CATEGORY_PARAM);
     if (selectedDay) {
-      url.searchParams.set(DAY_PARAM, selectedDay);
-    } else {
-      url.searchParams.delete(DAY_PARAM);
+      params.set(DAY_PARAM, selectedDay);
     }
+    filters.cities.forEach((city) => params.append(CITY_PARAM, city));
+    filters.categories.forEach((category) => params.append(CATEGORY_PARAM, category));
     window.history.replaceState({}, "", url);
-  }, [selectedDay]);
+  }, [selectedDay, filters]);
 
   useEffect(() => {
     setCopyState("idle");
