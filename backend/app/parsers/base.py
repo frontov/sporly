@@ -2072,6 +2072,11 @@ class ArtaSportParser(CssDirectoryParser):
             return "Плавание"
         if "беговел" in normalized or "самокат" in normalized:
             return "Другой вид"
+        if any(
+            token in normalized
+            for token in ("вело", "маунтинбайк", "мтб", "mtb", "xco", "xcm", "кросс-кантри")
+        ):
+            return "Велоспорт"
         if "кросс" in normalized or "забег" in normalized:
             return "Бег"
         return None
