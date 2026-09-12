@@ -3305,7 +3305,7 @@ class MyRaceParser(CssDirectoryParser):
         soup = BeautifulSoup(html, "html.parser")
         events: list[Event] = []
 
-        for index, card in enumerate(soup.select("a.events-list__item.row")):
+        for index, card in enumerate(soup.select("a.events-list__item[href]")):
             href = card.get("href")
             if not isinstance(href, str):
                 continue

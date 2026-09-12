@@ -193,9 +193,9 @@
       "enabled": true,
       "parser_type": "myrace",
       "selectors": {
-        "item": "a.events-list__item.row",
+        "item": "a.events-list__item[href]",
         "title": "h2",
-        "link": "a.events-list__item.row"
+        "link": "a.events-list__item[href]"
       }
     },
     {
