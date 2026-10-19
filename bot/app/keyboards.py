@@ -6,6 +6,7 @@ from app.api_client import Event
 from app.links import share_url
 from app.partners import Partner
 from app.storage import Subscription
+from app.text import EVENT_COLORS
 
 
 MENU_TEXTS = {
@@ -156,22 +157,18 @@ def search_list_keyboard(
         token = tokens.get(event.id)
         if not token:
             continue
-        number = offset + index
+        marker = EVENT_COLORS[(index - 1) % len(EVENT_COLORS)]
         is_favorite = event.id in favorite_ids
         row = [
             InlineKeyboardButton(
-                text=(
-                    f"✅ В избранном · {number}"
-                    if is_favorite
-                    else f"⭐ В избранное · {number}"
-                ),
+                text=f"{'✅' if is_favorite else '⭐'} {marker}",
                 callback_data=(
                     f"unfv:{token}" if is_favorite else f"fv:{token}"
                 ),
             )
         ]
         share = _url_button(
-            f"📤 Поделиться · {number}",
+            f"📤 {marker}",
             share_url(bot_username, token, event.title),
         )
         if share:
@@ -239,14 +236,15 @@ def favorites_list_keyboard(
         token = tokens.get(favorite.event_id)
         if not token:
             continue
+        marker = EVENT_COLORS[index % len(EVENT_COLORS)]
         actions.append(
             InlineKeyboardButton(
-                text=f"💔 {index + 1}",
+                text=f"💔 {marker}",
                 callback_data=f"favrm:{index}:{token}",
             )
         )
         share = _url_button(
-            f"📤 {index + 1}",
+            f"📤 {marker}",
             share_url(bot_username, token, favorite.title),
         )
         if share:

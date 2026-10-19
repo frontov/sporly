@@ -26,7 +26,7 @@ class FormattingTest(unittest.TestCase):
         self.assertIn("1 июня 2027", text)
         self.assertIn("https://example.com/?a=1&amp;b=2", text)
 
-    def test_event_list_indexes(self) -> None:
+    def test_event_list_uses_colored_markers(self) -> None:
         events = [
             Event(id=str(index), title=f"Старт {index}", source_name="Сайт")
             for index in range(1, 3)
@@ -34,8 +34,9 @@ class FormattingTest(unittest.TestCase):
         text = format_event_list(
             events, total=10, page=2, total_pages=5, page_size=4
         )
-        self.assertIn("5. Старт 1", text)
-        self.assertIn("6. Старт 2", text)
+        self.assertIn("🔴 Старт 1", text)
+        self.assertIn("🟠 Старт 2", text)
+        self.assertNotIn("6. Старт", text)
         self.assertIn("стр. 2/5", text)
 
     def test_event_list_links_titles(self) -> None:

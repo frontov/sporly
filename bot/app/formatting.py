@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from app.api_client import Event
 from app.storage import Favorite
-from app.text import countdown, format_date, pluralize
+from app.text import EVENT_COLORS, countdown, format_date, pluralize
 
 
 TAG_RE = re.compile(r"<[^>]+>")
@@ -159,7 +159,12 @@ def format_event(event: Event, index: int | None = None) -> str:
 
 def format_favorite(favorite: Favorite, index: int | None = None) -> str:
     title = escape(clean_text(favorite.title, 120))
-    prefix = f"{index}. " if index is not None else ""
+    marker = (
+        EVENT_COLORS[(index - 1) % len(EVENT_COLORS)] + " "
+        if index is not None
+        else ""
+    )
+    prefix = marker
     if favorite.source_url:
         heading = (
             f'<b>{prefix}<a href="{escape(favorite.source_url, quote=True)}">'
@@ -206,15 +211,15 @@ def format_event_list(
 
     cards: list[str] = []
     for position, event in enumerate(events, start=1):
-        number = (page - 1) * page_size + position
         event_title = escape(clean_text(event.title, 95))
+        marker = EVENT_COLORS[(position - 1) % len(EVENT_COLORS)]
         if event.source_url:
             heading = (
-                f'<b>{number}. <a href="{escape(event.source_url, quote=True)}">'
+                f'<b>{marker} <a href="{escape(event.source_url, quote=True)}">'
                 f"{event_title}</a></b>"
             )
         else:
-            heading = f"<b>{number}. {event_title}</b>"
+            heading = f"<b>{marker} {event_title}</b>"
 
         when = format_date(event.starts_at, event.date_text, short=True)
         place = clean_text(event.location or event.venue, 42)

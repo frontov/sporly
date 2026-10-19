@@ -6,6 +6,7 @@ import re
 
 MOSCOW_TZ = timezone(timedelta(hours=3))
 REMINDER_OFFSETS = (7, 3, 1, 0)
+EVENT_COLORS = ("🔴", "🟠", "🟡", "🟢", "🔵")
 
 MONTHS = (
     "",
