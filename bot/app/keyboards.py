@@ -343,17 +343,15 @@ def category_keyboard(
 
     rows.append(
         [
-            InlineKeyboardButton(text="Далее →", callback_data="flow:cat:done"),
             InlineKeyboardButton(text="Сбросить", callback_data="flow:cat:clear"),
-        ]
-    )
-    rows.append(
-        [
             InlineKeyboardButton(
                 text="Пропустить" if skip else "Отмена",
                 callback_data="flow:skip" if skip else "flow:cancel",
-            )
+            ),
         ]
+    )
+    rows.append(
+        [InlineKeyboardButton(text="Далее →", callback_data="flow:cat:done")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -368,14 +366,7 @@ def city_keyboard(
 ) -> InlineKeyboardMarkup:
     start = page * per_page
     visible = cities[start : start + per_page]
-    rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(
-                text=f"✅ Подтвердить · {len(selected)}",
-                callback_data="flow:city:done",
-            )
-        ]
-    ]
+    rows: list[list[InlineKeyboardButton]] = []
     pair: list[InlineKeyboardButton] = []
     for offset, city in enumerate(visible):
         mark = "✅ " if city in selected else ""
@@ -406,17 +397,25 @@ def city_keyboard(
 
     rows.append(
         [
-            InlineKeyboardButton(text="🌍 Вся Россия", callback_data="flow:city:all"),
+            InlineKeyboardButton(text="⬅️ К видам спорта", callback_data="flow:back"),
             InlineKeyboardButton(text="✍️ Другой город", callback_data="flow:city:other"),
         ]
     )
     rows.append(
         [
-            InlineKeyboardButton(text="⬅️ К видам спорта", callback_data="flow:back"),
+            InlineKeyboardButton(text="🌍 Вся Россия", callback_data="flow:city:all"),
             InlineKeyboardButton(
                 text="Пропустить" if skip else "Отмена",
                 callback_data="flow:skip" if skip else "flow:cancel",
             ),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=f"✅ Подтвердить · {len(selected)}",
+                callback_data="flow:city:done",
+            )
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
