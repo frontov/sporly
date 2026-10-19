@@ -152,13 +152,13 @@ def search_list_keyboard(
         nav.extend(
             [
                 InlineKeyboardButton(
-                    text="⬅️", callback_data=f"page:{session_id}:prev"
+                    text="👈", callback_data=f"page:{session_id}:prev"
                 ),
                 InlineKeyboardButton(
                     text=f"{page} / {total_pages}", callback_data="noop"
                 ),
                 InlineKeyboardButton(
-                    text="➡️", callback_data=f"page:{session_id}:next"
+                    text="👉", callback_data=f"page:{session_id}:next"
                 ),
             ]
         )
@@ -186,13 +186,13 @@ def favorites_list_keyboard(
         nav.extend(
             [
                 InlineKeyboardButton(
-                    text="⬅️", callback_data=f"favpg:{max(page - 1, 1)}"
+                    text="👈", callback_data=f"favpg:{max(page - 1, 1)}"
                 ),
                 InlineKeyboardButton(
                     text=f"{page} / {total_pages}", callback_data="noop"
                 ),
                 InlineKeyboardButton(
-                    text="➡️", callback_data=f"favpg:{min(page + 1, total_pages)}"
+                    text="👉", callback_data=f"favpg:{min(page + 1, total_pages)}"
                 ),
             ]
         )
