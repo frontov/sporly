@@ -295,6 +295,7 @@ async def render_search_page(
         total_pages=result.total_pages,
         filters=_session_summary(session),
         page_size=PAGE_SIZE,
+        bot_username=bot_username,
     )
     markup = search_list_keyboard(
         events=result.items,

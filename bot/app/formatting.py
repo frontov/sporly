@@ -198,6 +198,7 @@ def format_event_list(
     filters: str | None = None,
     title: str = "Ближайшие старты",
     page_size: int = 4,
+    bot_username: str = "",
 ) -> str:
     header = f"<b>{title}</b>\n"
     if filters:
@@ -229,6 +230,11 @@ def format_event_list(
             card += f"\n📅 {escape(meta)}"
         if facts_line:
             card += f"\n🏁 {escape(facts_line)}"
+        if bot_username:
+            card += (
+                f'\n<a href="https://t.me/{bot_username}?start=ev_'
+                f'{event_token(event.id)}">Подробнее →</a>'
+            )
         cards.append(card)
 
     text = header

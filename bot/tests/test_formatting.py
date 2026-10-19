@@ -88,6 +88,19 @@ class FormattingTest(unittest.TestCase):
         self.assertNotIn("start=fav_", text)
         self.assertNotIn("t.me/", text)
 
+    def test_event_list_has_detail_deep_link(self) -> None:
+        events = [Event(id="1", title="Старт", source_name="Сайт")]
+        text = format_event_list(
+            events,
+            total=1,
+            page=1,
+            total_pages=1,
+            page_size=4,
+            bot_username="sporly_bot",
+        )
+        self.assertIn("start=ev_", text)
+        self.assertIn("Подробнее", text)
+
     def test_favorite_location(self) -> None:
         favorite = Favorite(
             chat_id=1,
