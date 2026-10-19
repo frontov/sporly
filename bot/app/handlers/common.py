@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+import logging
 from pathlib import Path
 
 from aiogram import Bot, F, Router
@@ -39,6 +40,7 @@ from app.keyboards import (
 from app.text import greet_name
 
 
+logger = logging.getLogger(__name__)
 router = Router(name="common")
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 HERO_PATH = Path(__file__).resolve().parent.parent / "assets" / "hero.png"
@@ -233,25 +235,26 @@ async def cmd_start(
         return
 
     if event_token:
-        if event_back:
-            previous = await database.get_ui_message(chat_id)
-            if previous:
-                try:
-                    await bot.delete_message(chat_id, previous)
-                except Exception:
-                    pass
-                await database.clear_ui_message(chat_id)
-            try:
-                await message.delete()
-            except Exception:
-                pass
-        await show_single_event(
+        previous = (
+            await database.get_ui_message(chat_id) if event_back else None
+        )
+        sent = await show_single_event(
             bot,
             chat_id,
             event_token,
             bot_username=bot_username,
             back_callback=event_back,
         )
+        if event_back and sent is not None:
+            if previous and previous != sent.message_id:
+                try:
+                    await bot.delete_message(chat_id, previous)
+                except Exception:
+                    pass
+            try:
+                await message.delete()
+            except Exception as error:
+                logger.info("Cannot delete /start message: %s", error)
     elif favorite_token:
         changed, _ = await toggle_favorite_by_token(
             chat_id, favorite_token, add=True
