@@ -54,7 +54,8 @@ def _banner_media():
 
     if settings.public_base_url:
         return (
-            f"{settings.public_base_url.rstrip('/')}/static/list-banner.png"
+            f"{settings.public_base_url.rstrip('/')}"
+            "/static/list-banner.png?v=2"
         )
     return _LIST_BANNER_FILE_ID or FSInputFile(LIST_BANNER_PATH)
 
