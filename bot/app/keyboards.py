@@ -152,31 +152,31 @@ def search_list_keyboard(
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     offset = (page - 1) * 4
-    stars: list[InlineKeyboardButton] = []
-    shares: list[InlineKeyboardButton] = []
     for index, event in enumerate(events, start=1):
         token = tokens.get(event.id)
         if not token:
             continue
+        number = offset + index
         is_favorite = event.id in favorite_ids
-        stars.append(
+        row = [
             InlineKeyboardButton(
-                text=f"{'✅' if is_favorite else '⭐'} {offset + index}",
+                text=(
+                    f"✅ В избранном · {number}"
+                    if is_favorite
+                    else f"⭐ В избранное · {number}"
+                ),
                 callback_data=(
                     f"unfv:{token}" if is_favorite else f"fv:{token}"
                 ),
             )
-        )
+        ]
         share = _url_button(
-            f"📤 {offset + index}",
+            f"📤 Поделиться · {number}",
             share_url(bot_username, token, event.title),
         )
         if share:
-            shares.append(share)
-    if stars:
-        rows.append(stars)
-    if shares:
-        rows.append(shares)
+            row.append(share)
+        rows.append(row)
 
     if total_pages > 1:
         rows.append(

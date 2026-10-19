@@ -23,7 +23,12 @@ def _toggle_markup(
         for button in row:
             if button.callback_data in {f"fv:{token}", f"unfv:{token}"}:
                 if button.text[:1] in {"⭐", "✅"}:
-                    button.text = ("✅" if active else "⭐") + button.text[1:]
+                    suffix = button.text[1:]
+                    if active:
+                        suffix = suffix.replace("В избранное", "В избранном")
+                    else:
+                        suffix = suffix.replace("В избранном", "В избранное")
+                    button.text = ("✅" if active else "⭐") + suffix
                 else:
                     button.text = (
                         "✅ В избранном" if active else "⭐ В избранное"
