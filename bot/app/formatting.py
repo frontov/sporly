@@ -13,7 +13,7 @@ from app.text import EVENT_COLORS, countdown, format_date, pluralize
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
 # Invisible em-space line that keeps the message bubble at a stable width.
-WIDTH_PAD = "\u200b" + "\u2003" * 20 + "\u200b"
+WIDTH_PAD = "─" * 20
 
 
 def clean_text(value: str | None, limit: int = 0) -> str:
