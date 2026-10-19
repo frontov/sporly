@@ -865,13 +865,27 @@ class CatalogService:
             normalized_events = self._normalize_events(collected_events)
             if self._is_refresh_too_small(normalized_events):
                 logger.warning(
-                    "Skipping catalog refresh: %s fresh events vs %s cached "
-                    "(below %.0f%% threshold)",
+                    "Refresh collected only %s fresh events vs %s cached; "
+                    "retrying once in 5s",
                     len(normalized_events),
                     len(self._cache),
-                    settings.minimum_refresh_ratio * 100,
                 )
-                return
+                await asyncio.sleep(5)
+
+                retry_events = await self._collect_events()
+                if not retry_events:
+                    return
+
+                normalized_events = self._normalize_events(retry_events)
+                if self._is_refresh_too_small(normalized_events):
+                    logger.warning(
+                        "Skipping catalog refresh: %s fresh events vs %s cached "
+                        "(below %.0f%% threshold after retry)",
+                        len(normalized_events),
+                        len(self._cache),
+                        settings.minimum_refresh_ratio * 100,
+                    )
+                    return
 
             previous_count = len(self._cache)
             self._cache_created_at = time.time()
