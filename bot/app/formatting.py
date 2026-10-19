@@ -221,7 +221,7 @@ def format_event_list(
 
     cards: list[str] = []
     for position, event in enumerate(events, start=1):
-        event_title = escape(clean_text(event.title, 95))
+        event_title = escape(clean_text(event.title, 80))
         marker = EVENT_COLORS[(position - 1) % len(EVENT_COLORS)]
         heading = f"<b>{marker} {event_title}</b>"
 
@@ -257,7 +257,7 @@ def format_event_list(
     body = ""
     for card in cards:
         candidate = body + ("\n\n" if body else "") + card
-        if len(header) + len(WIDTH_PAD) + len(candidate) + 2 > 3900:
+        if len(header) + len(candidate) + 2 > 3900:
             break
         body = candidate
     return header + "\n" + WIDTH_PAD + ("\n" + body if body else "")

@@ -4,10 +4,12 @@ from dataclasses import replace
 from html import escape
 import json
 import logging
+from pathlib import Path
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     LinkPreviewOptions,
@@ -43,6 +45,7 @@ from app.text import EVENT_COLORS, REMINDER_OFFSETS, days_until, pluralize
 logger = logging.getLogger(__name__)
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 PAGE_SIZE = 4
+LIST_BANNER_PATH = Path(__file__).resolve().parent / "assets" / "list-banner.png"
 
 
 # --------------------------------------------------------------------- screens
@@ -327,7 +330,12 @@ async def render_search_page(
         )
 
     return await _edit_screen(
-        bot, chat_id, message, text=text, markup=markup
+        bot,
+        chat_id,
+        message,
+        text=text,
+        markup=markup,
+        photo=FSInputFile(LIST_BANNER_PATH),
     )
 
 
@@ -578,12 +586,7 @@ async def show_favorites(
         )
         for favorite in visible
     ]
-    from app.formatting import WIDTH_PAD
-
-    text = (
-        f"<b>⭐ Избранное</b> · {len(favorites)}\n"
-        f"{WIDTH_PAD}\n"
-    )
+    text = f"<b>⭐ Избранное</b> · {len(favorites)}\n\n"
     text += "\n\n".join(
         format_favorite(
             favorite,
@@ -605,6 +608,7 @@ async def show_favorites(
         message,
         text=text,
         markup=markup,
+        photo=FSInputFile(LIST_BANNER_PATH),
     )
 
 
