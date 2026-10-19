@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 import json
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -50,6 +51,9 @@ from app.parsers.base import (
 )
 from app.schemas.event import Event
 from app.settings import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -683,6 +687,7 @@ class CatalogService:
         self._available_sources: list[str] = []
         self._refresh_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task[None] | None = None
+        self._scheduler_task: asyncio.Task[None] | None = None
         self._load_persistent_cache()
 
     async def get_events(self, filters: EventFilters) -> list[Event]:
@@ -843,24 +848,53 @@ class CatalogService:
 
         return source_events
 
-    async def _refresh_cache(self) -> None:
+    async def _refresh_cache(self, force: bool = False) -> None:
         async with self._refresh_lock:
-            if self._cache and not self._is_cache_stale():
+            if not force and self._cache and not self._is_cache_stale():
                 return
 
+            logger.info(
+                "Refreshing catalog cache: %s cached events, force=%s",
+                len(self._cache),
+                force,
+            )
             collected_events = await self._collect_events()
             if not collected_events:
                 return
 
             normalized_events = self._normalize_events(collected_events)
-            if self._should_preserve_existing_cache(normalized_events):
+            if self._is_refresh_too_small(normalized_events):
+                logger.warning(
+                    "Skipping catalog refresh: %s fresh events vs %s cached "
+                    "(below %.0f%% threshold)",
+                    len(normalized_events),
+                    len(self._cache),
+                    settings.minimum_refresh_ratio * 100,
+                )
                 return
 
+            previous_count = len(self._cache)
             self._cache_created_at = time.time()
-            self._cache = self._apply_cache_metadata(normalized_events, self._cache_created_at)
+            next_events = self._apply_cache_metadata(
+                normalized_events, self._cache_created_at
+            )
+            configured_sources = {
+                config.name
+                for config in self._load_source_configs(settings.sources_file)
+            }
+            next_events = self._merge_stale_source_events(
+                next_events, configured_sources
+            )
+
+            self._cache = next_events
             self._cache_version = settings.cache_version
             self._rebuild_filter_metadata()
             self._write_persistent_cache()
+            logger.info(
+                "Catalog cache refreshed: %s events (was %s)",
+                len(next_events),
+                previous_count,
+            )
 
     def _ensure_background_refresh(self) -> None:
         if self._refresh_task and not self._refresh_task.done():
@@ -869,10 +903,62 @@ class CatalogService:
         self._refresh_task = asyncio.create_task(self._run_background_refresh())
 
     async def _run_background_refresh(self) -> None:
+        logger.info("Starting catalog cache refresh")
         try:
             await self._refresh_cache()
+        except Exception:
+            logger.exception("Catalog cache refresh failed")
         finally:
             self._refresh_task = None
+
+    def start_refresh_scheduler(self) -> None:
+        if not settings.refresh_scheduler_enabled:
+            logger.info("Catalog refresh scheduler is disabled")
+            return
+        if self._scheduler_task and not self._scheduler_task.done():
+            return
+        self._scheduler_task = asyncio.create_task(self._run_refresh_scheduler())
+
+    async def stop_refresh_scheduler(self) -> None:
+        task = self._scheduler_task
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._scheduler_task = None
+
+    async def _run_refresh_scheduler(self) -> None:
+        interval = max(int(settings.refresh_interval_seconds), 60)
+        logger.info("Catalog refresh scheduler started (interval=%ss)", interval)
+        try:
+            try:
+                if self._is_cache_stale():
+                    await self._refresh_cache()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Initial scheduled catalog refresh failed")
+
+            while True:
+                await asyncio.sleep(interval)
+                if self._refresh_lock.locked():
+                    logger.info(
+                        "Skipping scheduled refresh: another refresh is already running"
+                    )
+                    continue
+                try:
+                    await self._refresh_cache(force=True)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Scheduled catalog refresh failed")
+        except asyncio.CancelledError:
+            logger.info("Catalog refresh scheduler stopped")
+            raise
 
     def _load_persistent_cache(self) -> None:
         cache_file = settings.cache_file
@@ -915,35 +1001,73 @@ class CatalogService:
             encoding="utf-8",
         )
 
-    def _should_preserve_existing_cache(self, next_events: list[Event]) -> bool:
+    def _is_refresh_too_small(self, next_events: list[Event]) -> bool:
         if not self._cache:
             return False
-        if len(next_events) >= len(self._cache):
-            return self._has_critical_source_drop(next_events)
         refresh_ratio = len(next_events) / max(len(self._cache), 1)
-        return (
-            refresh_ratio < settings.minimum_refresh_ratio
-            or self._has_critical_source_drop(next_events)
-        )
+        return refresh_ratio < settings.minimum_refresh_ratio
 
-    def _has_critical_source_drop(self, next_events: list[Event]) -> bool:
+    def _merge_stale_source_events(
+        self,
+        fresh_events: list[Event],
+        configured_sources: set[str],
+    ) -> list[Event]:
+        if not self._cache:
+            return fresh_events
+
         current_counts = Counter(
             event.source_name or "UNKNOWN" for event in self._cache
         )
-        next_counts = Counter(
-            event.source_name or "UNKNOWN" for event in next_events
+        fresh_counts = Counter(
+            event.source_name or "UNKNOWN" for event in fresh_events
         )
 
+        stale_sources: set[str] = set()
         for source_name, current_count in current_counts.items():
-            if current_count < 20:
+            if source_name not in configured_sources or current_count < 20:
                 continue
-            next_count = next_counts.get(source_name, 0)
-            if next_count == 0:
-                return True
-            if next_count / current_count < 0.5:
-                return True
+            fresh_count = fresh_counts.get(source_name, 0)
+            if fresh_count == 0 or fresh_count / current_count < 0.5:
+                stale_sources.add(source_name)
 
-        return False
+        if not stale_sources:
+            return fresh_events
+
+        logger.info(
+            "Preserving cached events for sources with a critical drop: %s",
+            ", ".join(sorted(stale_sources)),
+        )
+
+        fresh_urls = {
+            self._canonical_source_url(str(event.source_url))
+            for event in fresh_events
+        }
+        fresh_signatures = {
+            signature
+            for event in fresh_events
+            if (signature := self._semantic_dedupe_key(event))
+        }
+
+        merged = list(fresh_events)
+        for event in self._cache:
+            if event.source_name not in stale_sources:
+                continue
+
+            source_url = self._canonical_source_url(str(event.source_url))
+            if source_url and source_url in fresh_urls:
+                continue
+
+            signature = self._semantic_dedupe_key(event)
+            if signature and signature in fresh_signatures:
+                continue
+
+            merged.append(event)
+            if source_url:
+                fresh_urls.add(source_url)
+            if signature:
+                fresh_signatures.add(signature)
+
+        return merged
 
     def _rebuild_filter_metadata(self) -> None:
         self._available_cities = self.build_available_cities(self._cache)
@@ -1267,6 +1391,8 @@ class CatalogService:
             return events
         return [
             event.model_copy(update={"last_checked_at": checked_at_iso})
+            if not event.last_checked_at
+            else event
             for event in events
         ]
 

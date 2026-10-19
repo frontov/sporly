@@ -202,8 +202,7 @@
       "name": "RaceTime",
       "base_url": "https://racetime.online",
       "listing_urls": [
-        "https://racetime.online",
-        "https://racetime.online/moskvoretsky/7moskvoretsky2026"
+        "https://racetime.online/api/afisha/races?type=Upcoming"
       ],
       "enabled": true,
       "parser_type": "racetime",

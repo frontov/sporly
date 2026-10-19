@@ -1,6 +1,8 @@
+from contextlib import asynccontextmanager
 from datetime import datetime
 from html import escape
 import json
+import logging
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
@@ -12,10 +14,30 @@ from app.services.catalog import CatalogService, EventFilters
 from app.settings import settings
 
 
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logging.getLogger("app").setLevel(logging.INFO)
+
+
+catalog_service = CatalogService()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    catalog_service.start_refresh_scheduler()
+    try:
+        yield
+    finally:
+        await catalog_service.stop_refresh_scheduler()
+
+
 app = FastAPI(
     title="Sports Events Aggregator",
     version="0.1.0",
     description="Unified catalog of sports events collected from scraped websites.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -26,8 +48,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=500)
-
-catalog_service = CatalogService()
 
 CYRILLIC_TO_LATIN = {
     "а": "a",

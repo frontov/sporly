@@ -16,6 +16,8 @@ services:
       MAX_CONCURRENT_SOURCES: ${MAX_CONCURRENT_SOURCES:-2}
       MAX_ENRICH_EVENTS_PER_SOURCE: ${MAX_ENRICH_EVENTS_PER_SOURCE:-120}
       MINIMUM_REFRESH_RATIO: ${MINIMUM_REFRESH_RATIO:-0.7}
+      REFRESH_SCHEDULER_ENABLED: ${REFRESH_SCHEDULER_ENABLED:-true}
+      REFRESH_INTERVAL_SECONDS: ${REFRESH_INTERVAL_SECONDS:-1800}
     volumes:
       - ./backend/app/data:/app/app/data
       - ./backend/app/config/sources.json:/app/app/config/sources.json:ro

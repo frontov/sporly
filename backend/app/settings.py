@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     max_enrich_events_per_source: int = 120
     minimum_refresh_ratio: float = 0.7
     cache_ttl_seconds: int = 300
+    refresh_scheduler_enabled: bool = True
+    refresh_interval_seconds: int = 1800
     cache_file: Path = BASE_DIR / "data" / "events_cache.json"
     user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "

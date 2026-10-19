@@ -139,6 +139,8 @@ sudo systemctl start sporly
 - `REQUEST_TIMEOUT_SECONDS`
 - `SOURCE_TIMEOUT_SECONDS`
 - `ENRICH_TIMEOUT_SECONDS`
+- `REFRESH_SCHEDULER_ENABLED`
+- `REFRESH_INTERVAL_SECONDS`
 
 Для локальной разработки:
 
@@ -167,7 +169,11 @@ cp backend/.env.example backend/.env
 - кэш хранится в `backend/app/data/events_cache.json`;
 - backend поднимает кэш с диска после рестарта;
 - если TTL не истек, сайты заново не парсятся;
-- при refresh backend защищен от перезаписи кэша слишком маленькой выборкой.
+- при refresh backend защищен от перезаписи кэша слишком маленькой выборкой;
+- если отдельный источник резко просел или временно недоступен, его события сохраняются из старого кэша, а остальные источники обновляются;
+- полный refresh отклоняется только при общем падении выборки ниже `MINIMUM_REFRESH_RATIO`;
+- фоновый планировщик обновляет кэш каждые `REFRESH_INTERVAL_SECONDS` (по умолчанию 1800 секунд), даже если запросов к API нет;
+- планировщик можно отключить через `REFRESH_SCHEDULER_ENABLED=false` — тогда останется только ленивый refresh по TTL.
 
 ## Полезные команды
 
