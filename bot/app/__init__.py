@@ -1,0 +1,1 @@
+"""Sporly Telegram bot."""

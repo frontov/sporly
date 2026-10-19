@@ -33,8 +33,33 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+      - bot
     expose:
       - "80"
+
+  bot:
+    build:
+      context: ./bot
+    container_name: sporly-bot
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      ADMIN_TELEGRAM_IDS: ${ADMIN_TELEGRAM_IDS:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
+      API_BASE_URL: http://backend:8000
+      PUBLIC_BASE_URL: https://${DOMAIN}
+      PARTNER_CONTACT: ${PARTNER_CONTACT:-@fronteno}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-900}
+      DIGEST_HOUR_UTC: ${DIGEST_HOUR_UTC:-6}
+      PARTNER_CONFIG_FILE: /app/app/config/partners.json
+    volumes:
+      - ./bot/app/data:/app/app/data
+      - ./bot/app/config/partners.json:/app/app/config/partners.json:ro
+    expose:
+      - "8081"
 
   caddy:
     image: caddy:2.8-alpine

@@ -10,3 +10,7 @@ backend/.mypy_cache/
 frontend/node_modules/
 frontend/dist/
 backend/app/data/
+bot/app/data/*.db
+bot/app/data/*.db-shm
+bot/app/data/*.db-wal
+bot/app/data/*.json

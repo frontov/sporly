@@ -20,6 +20,25 @@ services:
     expose:
       - "8000"
 
+  bot:
+    build:
+      context: ./bot
+    container_name: sporly-bot
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file:
+      - path: ./bot/.env
+        required: false
+    environment:
+      API_BASE_URL: http://backend:8000
+      PARTNER_CONFIG_FILE: /app/app/config/partners.json
+    volumes:
+      - ./bot/app/data:/app/app/data
+      - ./bot/app/config/partners.json:/app/app/config/partners.json:ro
+    expose:
+      - "8081"
+
   frontend:
     build:
       context: ./frontend
@@ -27,5 +46,6 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+      - bot
     ports:
       - "8080:80"

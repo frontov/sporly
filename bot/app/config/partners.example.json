@@ -1,0 +1,20 @@
+{
+  "partners": [
+    {
+      "id": "example-partner",
+      "enabled": false,
+      "label": "Партнёр",
+      "title": "Здесь может быть ваш старт",
+      "text": "Показывайте событие пользователям, которые ищут подходящие старты.",
+      "button_text": "Разместить рекламу",
+      "url": "https://t.me/your_contact",
+      "placements": ["search", "digest"],
+      "cities": [],
+      "categories": [],
+      "keywords": [],
+      "weight": 1,
+      "starts_at": null,
+      "ends_at": null
+    }
+  ]
+}
