@@ -87,7 +87,12 @@ async def send_home(bot: Bot, chat_id: int) -> Message | None:
     global _HERO_FILE_ID
     if HERO_PATH.exists():
         try:
-            photo = _HERO_FILE_ID or FSInputFile(HERO_PATH)
+            if settings.public_base_url:
+                photo = (
+                    f"{settings.public_base_url.rstrip('/')}/static/hero.png"
+                )
+            else:
+                photo = _HERO_FILE_ID or FSInputFile(HERO_PATH)
             sent = await bot.send_photo(
                 chat_id,
                 photo=photo,

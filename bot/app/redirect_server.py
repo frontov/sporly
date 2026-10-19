@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 BANNER_PATH = Path(__file__).resolve().parent / "assets" / "list-banner.png"
+HERO_PATH = Path(__file__).resolve().parent / "assets" / "hero.png"
 
 
 async def health(_: web.Request) -> web.Response:
@@ -22,10 +23,18 @@ async def health(_: web.Request) -> web.Response:
 
 
 async def list_banner(_: web.Request) -> web.StreamResponse:
-    if not BANNER_PATH.exists():
+    return await _static_image(BANNER_PATH)
+
+
+async def hero_image(_: web.Request) -> web.StreamResponse:
+    return await _static_image(HERO_PATH)
+
+
+async def _static_image(path: Path) -> web.StreamResponse:
+    if not path.exists():
         raise web.HTTPNotFound()
     return web.FileResponse(
-        BANNER_PATH,
+        path,
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
@@ -92,6 +101,7 @@ def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/health", health)
     app.router.add_get("/static/list-banner.png", list_banner)
+    app.router.add_get("/static/hero.png", hero_image)
     app.router.add_get("/go/event/{token}", event_go)
     app.router.add_get("/go/{partner_id}", go)
     return app
