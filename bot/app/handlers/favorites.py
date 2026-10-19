@@ -35,7 +35,7 @@ def _toggle_markup(
                     button.text = text
                 else:
                     button.text = (
-                        "✅ В избранном" if active else "⭐ В избранное"
+                        "В избранном ✅" if active else "В избранное ⭐"
                     )
                 button.callback_data = (
                     f"unfv:{token}" if active else f"fv:{token}"

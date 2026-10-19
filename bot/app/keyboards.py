@@ -162,9 +162,9 @@ def search_list_keyboard(
         row = [
             InlineKeyboardButton(
                 text=(
-                    f"{marker} ✅ В избранном"
+                    f"{marker} В избранном ✅"
                     if is_favorite
-                    else f"{marker} ⭐ В избранное"
+                    else f"{marker} В избранное ⭐"
                 ),
                 callback_data=(
                     f"unfv:{token}" if is_favorite else f"fv:{token}"
@@ -172,7 +172,7 @@ def search_list_keyboard(
             )
         ]
         share = _url_button(
-            f"{marker} 📤 Поделиться",
+            f"{marker} Поделиться 📤",
             share_url(bot_username, token, event.title),
         )
         if share:
@@ -243,12 +243,12 @@ def favorites_list_keyboard(
         marker = EVENT_COLORS[index % len(EVENT_COLORS)]
         actions.append(
             InlineKeyboardButton(
-                text=f"{marker} 💔 Убрать",
+                text=f"{marker} Убрать 💔",
                 callback_data=f"favrm:{index}:{token}",
             )
         )
         share = _url_button(
-            f"{marker} 📤 Поделиться",
+            f"{marker} Поделиться 📤",
             share_url(bot_username, token, favorite.title),
         )
         if share:
@@ -292,7 +292,11 @@ def single_event_keyboard(
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
-                text="💔 Убрать из избранного" if is_favorite else "⭐ В избранное",
+                text=(
+                    "Убрать из избранного 💔"
+                    if is_favorite
+                    else "В избранное ⭐"
+                ),
                 callback_data=f"unfv:{token}" if is_favorite else f"fv:{token}",
             )
         ]
@@ -301,7 +305,9 @@ def single_event_keyboard(
     source = _url_button("Открыть ↗", source_url)
     if source:
         actions.append(source)
-    share = _url_button("📤 Поделиться", share_url(bot_username, token, title))
+    share = _url_button(
+        "Поделиться 📤", share_url(bot_username, token, title)
+    )
     if share:
         actions.append(share)
     if actions:
