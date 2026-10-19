@@ -214,7 +214,20 @@ git pull
 docker compose --env-file .env.prod -f docker-compose.prod.yml up --build -d
 ```
 
-## 12. Что должно получиться
+## 12. Бот на отдельном сервере
+
+Backend и frontend можно оставить на основном сервере, а Telegram-бота
+развернуть отдельно. Инструкция: `deploy/bot/README.md`.
+
+Коротко:
+
+- бот в `/opt/sporly-bot`;
+- `API_BASE_URL=https://sporly.ru`;
+- `PUBLIC_BASE_URL=https://go.sporly.ru`;
+- `go.sporly.ru` указывает на сервер бота;
+- Caddy проксирует `go.sporly.ru` на `sporly-bot:8081`.
+
+## 13. Что должно получиться
 
 После успешного деплоя:
 

@@ -1,0 +1,26 @@
+services:
+  bot:
+    build:
+      context: ./bot
+    container_name: sporly-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      API_BASE_URL: https://sporly.ru
+      PUBLIC_BASE_URL: https://go.sporly.ru
+      PARTNER_CONFIG_FILE: /app/app/config/partners.json
+    volumes:
+      - ./data:/app/app/data
+      - ./bot/app/config/partners.json:/app/app/config/partners.json:ro
+    networks:
+      - blog_default
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  blog_default:
+    external: true
