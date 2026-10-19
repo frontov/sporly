@@ -276,7 +276,7 @@ async def render_search_page(
             markup=no_results_keyboard(),
         )
 
-    tokens = await _event_tokens(result.items)
+    await _event_tokens(result.items)
     partner, partner_url = await _find_partner(
         chat_id,
         placement="search",
@@ -305,8 +305,6 @@ async def render_search_page(
         session_id=session.id,
     )
     markup = search_list_keyboard(
-        events=result.items,
-        tokens=tokens,
         session_id=session.id,
         page=result.page,
         total_pages=result.total_pages,
@@ -582,17 +580,19 @@ async def show_favorites(
     ]
     text = f"<b>⭐ Избранное</b> · {len(favorites)}\n\n"
     text += "\n\n".join(
-        format_favorite(favorite, index=start + index)
+        format_favorite(
+            favorite,
+            index=start + index,
+            bot_username=bot_username,
+            page=page,
+        )
         for index, favorite in enumerate(display_favorites, start=1)
     )
     text += "\n\nНапомним за 7, 3 и 1 день до старта."
 
     markup = favorites_list_keyboard(
-        favorites=visible,
-        tokens=tokens,
         page=page,
         total_pages=total_pages,
-        page_size=FAVORITES_PAGE_SIZE,
     )
     return await _edit_screen(
         bot,

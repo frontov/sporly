@@ -161,6 +161,8 @@ def format_event(event: Event, index: int | None = None) -> str:
 def format_favorite(
     favorite: Favorite,
     index: int | None = None,
+    bot_username: str = "",
+    page: int = 1,
 ) -> str:
     title = escape(clean_text(favorite.title, 120))
     marker = (
@@ -186,6 +188,12 @@ def format_favorite(
         lines.append(f"📅 {escape(meta)}")
     if favorite.category:
         lines.append(f"🏁 {escape(clean_text(favorite.category, 40))}")
+    if bot_username:
+        payload = f"evf_{event_token(favorite.event_id)}_{page}"
+        lines.append(
+            f'<a href="https://t.me/{bot_username}?start={payload}">'
+            "Подробнее →</a>"
+        )
     return "\n".join(lines)
 
 

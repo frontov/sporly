@@ -178,6 +178,13 @@ async def cmd_start(
             event_back = f"back:s:{parts[2]}:{parts[3]}"
         else:
             event_token = None
+    elif payload.startswith("evf_"):
+        parts = payload.split("_")
+        if len(parts) >= 3:
+            event_token = parts[1]
+            event_back = f"back:f:{parts[2]}"
+        else:
+            event_token = None
     favorite_token = payload[4:] if payload.startswith("fav_") else None
     unfavorite_token = payload[6:] if payload.startswith("unfav_") else None
     referrer_id: int | None = None

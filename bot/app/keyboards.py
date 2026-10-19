@@ -140,8 +140,6 @@ def more_keyboard(
 
 def search_list_keyboard(
     *,
-    events: list[Event],
-    tokens: dict[str, str],
     session_id: str,
     page: int,
     total_pages: int,
@@ -149,22 +147,6 @@ def search_list_keyboard(
     partner_url: str | None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-
-    markers: list[InlineKeyboardButton] = []
-    for index, event in enumerate(events, start=1):
-        token = tokens.get(event.id)
-        if not token:
-            continue
-        marker = EVENT_COLORS[(index - 1) % len(EVENT_COLORS)]
-        markers.append(
-            InlineKeyboardButton(
-                text=f"{marker} →",
-                callback_data=f"detail:s:{session_id}:{page}:{index - 1}:{token}",
-            )
-        )
-    if markers:
-        rows.append(markers)
-
     nav: list[InlineKeyboardButton] = []
     if total_pages > 1:
         nav.extend(
@@ -195,29 +177,10 @@ def search_list_keyboard(
 
 def favorites_list_keyboard(
     *,
-    favorites: list,
-    tokens: dict[str, str],
     page: int,
     total_pages: int,
-    page_size: int = 5,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    offset = (page - 1) * page_size
-    markers: list[InlineKeyboardButton] = []
-    for index, favorite in enumerate(favorites, start=offset):
-        token = tokens.get(favorite.event_id)
-        if not token:
-            continue
-        marker = EVENT_COLORS[index % len(EVENT_COLORS)]
-        markers.append(
-            InlineKeyboardButton(
-                text=f"{marker} →",
-                callback_data=f"detail:f:{page}:{index}:{token}",
-            )
-        )
-    if markers:
-        rows.append(markers)
-
     nav: list[InlineKeyboardButton] = []
     if total_pages > 1:
         nav.extend(
