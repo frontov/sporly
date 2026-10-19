@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from html import escape
 import json
 import logging
@@ -39,31 +40,53 @@ from app.keyboards import (
 from app.partners import Partner
 from app.sessions import SearchSession
 from app.storage import Subscription
-from app.text import EVENT_COLORS, REMINDER_OFFSETS, days_until, pluralize
+from app.text import (
+    EVENT_COLORS,
+    MOSCOW_TZ,
+    REMINDER_OFFSETS,
+    days_until,
+    pluralize,
+)
 
 
 logger = logging.getLogger(__name__)
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 PAGE_SIZE = 4
-LIST_BANNER_PATH = Path(__file__).resolve().parent / "assets" / "list-banner.png"
-_LIST_BANNER_FILE_ID: str | None = None
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+SEASON_ASSETS = {
+    "winter": ASSETS_DIR / "season-winter.gif",
+    "spring": ASSETS_DIR / "season-spring.gif",
+    "summer": ASSETS_DIR / "season-summer.gif",
+    "autumn": ASSETS_DIR / "season-autumn.gif",
+}
+_SEASON_FILE_IDS: dict[str, str] = {}
 
 
-def _banner_media():
+def current_season() -> str:
     from app.config import settings
 
-    if settings.public_base_url:
-        return (
-            f"{settings.public_base_url.rstrip('/')}"
-            "/static/list-banner.png?v=2"
-        )
-    return _LIST_BANNER_FILE_ID or FSInputFile(LIST_BANNER_PATH)
+    override = settings.season_override.strip().lower()
+    if override in SEASON_ASSETS:
+        return override
+    month = datetime.now(MOSCOW_TZ).month
+    if month in (12, 1, 2):
+        return "winter"
+    if month in (3, 4, 5):
+        return "spring"
+    if month in (6, 7, 8):
+        return "summer"
+    return "autumn"
 
 
-def _remember_banner(message: Message | None) -> None:
-    global _LIST_BANNER_FILE_ID
-    if _LIST_BANNER_FILE_ID is None and message is not None and message.photo:
-        _LIST_BANNER_FILE_ID = message.photo[-1].file_id
+def _season_media(season: str):
+    return _SEASON_FILE_IDS.get(season) or FSInputFile(SEASON_ASSETS[season])
+
+
+def _remember_season(season: str, message: Message | None) -> None:
+    animation = getattr(message, "animation", None) if message else None
+    file_id = getattr(animation, "file_id", None)
+    if file_id:
+        _SEASON_FILE_IDS[season] = file_id
 
 
 # --------------------------------------------------------------------- screens
@@ -85,10 +108,23 @@ async def _send_screen(
     text: str,
     markup: InlineKeyboardMarkup | None = None,
     photo=None,
+    animation=None,
     track: bool = True,
 ) -> Message | None:
     sent: Message | None = None
-    if photo:
+
+    if animation:
+        try:
+            sent = await bot.send_animation(
+                chat_id,
+                animation=animation,
+                caption=text,
+                reply_markup=markup,
+            )
+        except Exception as error:
+            logger.info("Cannot send animation: %s", error)
+
+    if sent is None and photo:
         try:
             sent = await bot.send_photo(
                 chat_id,
@@ -97,7 +133,8 @@ async def _send_screen(
                 reply_markup=markup,
             )
         except Exception as error:
-            logger.info("Cannot send photo %s: %s", photo, error)
+            logger.info("Cannot send photo: %s", error)
+
     if sent is None:
         try:
             sent = await bot.send_message(
@@ -109,6 +146,7 @@ async def _send_screen(
         except Exception:
             logger.exception("Cannot send screen to %s", chat_id)
             return None
+
     if track and sent is not None:
         await database.set_ui_message(chat_id, sent.message_id)
     return sent
@@ -122,27 +160,36 @@ async def _edit_screen(
     text: str,
     markup: InlineKeyboardMarkup | None = None,
     photo=None,
-    photo_key: str | None = None,
-    photo_failures: set[str] | None = None,
+    animation=None,
 ) -> Message | None:
-    """Edit the current screen in place, switching between text and photo.
+    """Edit the current screen in place, switching between text and media.
 
-    Telegram cannot convert a text message into a photo message (or back), so
-    those transitions delete the old message and send a new one.
+    Telegram cannot convert a text message into media (or vice versa), so those
+    transitions delete the old message and send a new one.
     """
 
     if message is None:
         return await _send_screen(
-            bot, chat_id, text=text, markup=markup, photo=photo
+            bot,
+            chat_id,
+            text=text,
+            markup=markup,
+            photo=photo,
+            animation=animation,
         )
 
-    has_photo = bool(message.photo)
-    if photo and has_photo:
+    current = (
+        "animation"
+        if getattr(message, "animation", None)
+        else "photo"
+        if getattr(message, "photo", None)
+        else "text"
+    )
+    desired = "animation" if animation else "photo" if photo else "text"
+
+    if current == desired and desired in {"animation", "photo"}:
         try:
-            await message.edit_caption(
-                caption=text,
-                reply_markup=markup,
-            )
+            await message.edit_caption(caption=text, reply_markup=markup)
             return message
         except TelegramBadRequest as error:
             if "message is not modified" in str(error).lower():
@@ -150,19 +197,7 @@ async def _edit_screen(
             logger.info("Cannot edit caption: %s", error)
         except Exception as error:
             logger.info("Cannot edit caption: %s", error)
-    elif photo and not has_photo:
-        await _delete(message)
-        sent = await _send_screen(
-            bot, chat_id, text=text, markup=markup, photo=photo
-        )
-        if sent is None and photo_key and photo_failures is not None:
-            photo_failures.add(photo_key)
-            return await _send_screen(bot, chat_id, text=text, markup=markup)
-        return sent
-    elif not photo and has_photo:
-        await _delete(message)
-        return await _send_screen(bot, chat_id, text=text, markup=markup)
-    else:
+    elif current == "text" and desired == "text":
         try:
             await message.edit_text(
                 text,
@@ -176,14 +211,16 @@ async def _edit_screen(
             logger.info("Cannot edit message: %s", error)
         except Exception as error:
             logger.info("Cannot edit message: %s", error)
-        await _delete(message)
-        return await _send_screen(bot, chat_id, text=text, markup=markup)
 
-    # A photo edit failed for an unknown reason. Fall back to text.
-    if photo_key and photo_failures is not None:
-        photo_failures.add(photo_key)
     await _delete(message)
-    return await _send_screen(bot, chat_id, text=text, markup=markup)
+    return await _send_screen(
+        bot,
+        chat_id,
+        text=text,
+        markup=markup,
+        photo=photo,
+        animation=animation,
+    )
 
 
 async def delete_current_screen(message: Message | None) -> None:
@@ -347,15 +384,16 @@ async def render_search_page(
             ),
         )
 
+    season = current_season()
     sent = await _edit_screen(
         bot,
         chat_id,
         message,
         text=text,
         markup=markup,
-        photo=_banner_media(),
+        animation=_season_media(season),
     )
-    _remember_banner(sent)
+    _remember_season(season, sent)
     return sent
 
 
@@ -622,15 +660,16 @@ async def show_favorites(
         page=page,
         total_pages=total_pages,
     )
+    season = current_season()
     sent = await _edit_screen(
         bot,
         chat_id,
         message,
         text=text,
         markup=markup,
-        photo=_banner_media(),
+        animation=_season_media(season),
     )
-    _remember_banner(sent)
+    _remember_season(season, sent)
     return sent
 
 

@@ -14,16 +14,11 @@ from app.context import database, partner_registry
 logger = logging.getLogger(__name__)
 
 
-BANNER_PATH = Path(__file__).resolve().parent / "assets" / "list-banner.png"
 HERO_PATH = Path(__file__).resolve().parent / "assets" / "hero.png"
 
 
 async def health(_: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
-
-
-async def list_banner(_: web.Request) -> web.StreamResponse:
-    return await _static_image(BANNER_PATH)
 
 
 async def hero_image(_: web.Request) -> web.StreamResponse:
@@ -100,7 +95,6 @@ async def go(request: web.Request) -> web.StreamResponse:
 def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/health", health)
-    app.router.add_get("/static/list-banner.png", list_banner)
     app.router.add_get("/static/hero.png", hero_image)
     app.router.add_get("/go/event/{token}", event_go)
     app.router.add_get("/go/{partner_id}", go)

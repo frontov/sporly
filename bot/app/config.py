@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # Local data
     database_file: str = str(BASE_DIR / "app" / "data" / "sporly.db")
     webapp_url: str = "https://sporly.ru"
+    season_override: str = ""
 
     redirect_host: str = "0.0.0.0"
     redirect_port: int = 8081
