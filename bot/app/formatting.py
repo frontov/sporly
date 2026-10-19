@@ -12,6 +12,8 @@ from app.text import EVENT_COLORS, countdown, format_date, pluralize
 
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
+# Invisible em-space line that keeps the message bubble at a stable width.
+WIDTH_PAD = "\u200b" + "\u2003" * 20 + "\u200b"
 
 
 def clean_text(value: str | None, limit: int = 0) -> str:
@@ -252,13 +254,13 @@ def format_event_list(
             )
         cards.append(card)
 
-    text = header
+    body = ""
     for card in cards:
-        candidate = text + "\n\n" + card
-        if len(candidate) > 3900:
+        candidate = body + ("\n\n" if body else "") + card
+        if len(header) + len(WIDTH_PAD) + len(candidate) + 2 > 3900:
             break
-        text = candidate
-    return text
+        body = candidate
+    return header + "\n" + WIDTH_PAD + ("\n" + body if body else "")
 
 
 def format_event_details(event: Event, marker: str = "") -> str:

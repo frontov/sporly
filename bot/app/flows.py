@@ -578,7 +578,12 @@ async def show_favorites(
         )
         for favorite in visible
     ]
-    text = f"<b>⭐ Избранное</b> · {len(favorites)}\n\n"
+    from app.formatting import WIDTH_PAD
+
+    text = (
+        f"<b>⭐ Избранное</b> · {len(favorites)}\n"
+        f"{WIDTH_PAD}\n"
+    )
     text += "\n\n".join(
         format_favorite(
             favorite,
