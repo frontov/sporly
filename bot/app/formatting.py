@@ -169,13 +169,7 @@ def format_favorite(
         else ""
     )
     prefix = marker
-    if favorite.source_url:
-        heading = (
-            f'<b>{prefix}<a href="{escape(favorite.source_url, quote=True)}">'
-            f"{title}</a></b>"
-        )
-    else:
-        heading = f"<b>{prefix}{title}</b>"
+    heading = f"<b>{prefix}{title}</b>"
 
     when = format_date(favorite.starts_at, favorite.date_text, short=True)
     relative = countdown(favorite.starts_at)
@@ -217,13 +211,7 @@ def format_event_list(
     for position, event in enumerate(events, start=1):
         event_title = escape(clean_text(event.title, 95))
         marker = EVENT_COLORS[(position - 1) % len(EVENT_COLORS)]
-        if event.source_url:
-            heading = (
-                f'<b>{marker} <a href="{escape(event.source_url, quote=True)}">'
-                f"{event_title}</a></b>"
-            )
-        else:
-            heading = f"<b>{marker} {event_title}</b>"
+        heading = f"<b>{marker} {event_title}</b>"
 
         when = format_date(event.starts_at, event.date_text, short=True)
         place = clean_text(event.location or event.venue, 42)

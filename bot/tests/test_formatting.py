@@ -39,7 +39,7 @@ class FormattingTest(unittest.TestCase):
         self.assertNotIn("6. Старт", text)
         self.assertIn("стр. 2/5", text)
 
-    def test_event_list_links_titles(self) -> None:
+    def test_event_list_titles_are_not_external_links(self) -> None:
         events = [
             Event(
                 id="1",
@@ -51,7 +51,8 @@ class FormattingTest(unittest.TestCase):
         text = format_event_list(
             events, total=1, page=1, total_pages=1, page_size=4
         )
-        self.assertIn('<a href="https://example.com/event">Старт</a>', text)
+        self.assertNotIn("https://example.com/event", text)
+        self.assertIn("🔴 Старт", text)
 
     def test_event_card_fits_photo_caption(self) -> None:
         event = Event(
