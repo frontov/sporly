@@ -162,7 +162,7 @@ async def _render_cities(callback: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-async def send_onboarding(bot: Bot, chat_id: int, state: FSMContext) -> None:
+async def send_onboarding(bot: Bot, chat_id: int, state: FSMContext) -> Message | None:
     subscription = await database.get_subscription(chat_id)
     categories_selected = list(subscription.categories) if subscription else []
     cities_selected = list(subscription.cities) if subscription else []

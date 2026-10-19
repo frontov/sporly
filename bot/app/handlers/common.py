@@ -129,6 +129,13 @@ async def send_more(bot: Bot, chat_id: int, *, bot_username: str = "") -> Messag
     )
 
 
+async def _delete_start_message(message: Message) -> None:
+    try:
+        await message.delete()
+    except Exception as error:
+        logger.info("Cannot delete /start message: %s", error)
+
+
 async def _remove_legacy_keyboard(
     message: Message, chat_id: int, ui_version: int
 ) -> None:
@@ -232,6 +239,7 @@ async def cmd_start(
         and subscription is None
     ):
         await send_onboarding(bot, chat_id, state)
+        await _delete_start_message(message)
         return
 
     if event_token:
@@ -251,10 +259,8 @@ async def cmd_start(
                     await bot.delete_message(chat_id, previous)
                 except Exception:
                     pass
-            try:
-                await message.delete()
-            except Exception as error:
-                logger.info("Cannot delete /start message: %s", error)
+        if sent is not None:
+            await _delete_start_message(message)
     elif favorite_token:
         changed, _ = await toggle_favorite_by_token(
             chat_id, favorite_token, add=True
@@ -271,6 +277,7 @@ async def cmd_start(
             await bot.send_message(
                 chat_id, "Эта ссылка устарела. Найдите старт заново."
             )
+        await _delete_start_message(message)
     elif unfavorite_token:
         changed, _ = await toggle_favorite_by_token(
             chat_id, unfavorite_token, add=False
@@ -287,8 +294,11 @@ async def cmd_start(
             await bot.send_message(
                 chat_id, "Эта ссылка устарела. Найдите старт заново."
             )
+        await _delete_start_message(message)
     else:
-        await send_home(bot, chat_id)
+        sent_home = await send_home(bot, chat_id)
+        if sent_home is not None:
+            await _delete_start_message(message)
 
 
 @router.message(Command("help"))
