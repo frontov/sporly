@@ -161,14 +161,18 @@ def search_list_keyboard(
         is_favorite = event.id in favorite_ids
         row = [
             InlineKeyboardButton(
-                text=f"{'✅' if is_favorite else '⭐'} {marker}",
+                text=(
+                    f"{marker} ✅ В избранном"
+                    if is_favorite
+                    else f"{marker} ⭐ В избранное"
+                ),
                 callback_data=(
                     f"unfv:{token}" if is_favorite else f"fv:{token}"
                 ),
             )
         ]
         share = _url_button(
-            f"📤 {marker}",
+            f"{marker} 📤 Поделиться",
             share_url(bot_username, token, event.title),
         )
         if share:
@@ -239,12 +243,12 @@ def favorites_list_keyboard(
         marker = EVENT_COLORS[index % len(EVENT_COLORS)]
         actions.append(
             InlineKeyboardButton(
-                text=f"💔 {marker}",
+                text=f"{marker} 💔 Убрать",
                 callback_data=f"favrm:{index}:{token}",
             )
         )
         share = _url_button(
-            f"📤 {marker}",
+            f"{marker} 📤 Поделиться",
             share_url(bot_username, token, favorite.title),
         )
         if share:

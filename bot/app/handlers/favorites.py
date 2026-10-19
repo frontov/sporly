@@ -22,13 +22,17 @@ def _toggle_markup(
     for row in markup.inline_keyboard:
         for button in row:
             if button.callback_data in {f"fv:{token}", f"unfv:{token}"}:
-                if button.text[:1] in {"⭐", "✅"}:
-                    suffix = button.text[1:]
+                if "⭐" in button.text or "✅" in button.text:
+                    text = button.text
                     if active:
-                        suffix = suffix.replace("В избранное", "В избранном")
+                        text = text.replace("⭐", "✅").replace(
+                            "В избранное", "В избранном"
+                        )
                     else:
-                        suffix = suffix.replace("В избранном", "В избранное")
-                    button.text = ("✅" if active else "⭐") + suffix
+                        text = text.replace("✅", "⭐").replace(
+                            "В избранном", "В избранное"
+                        )
+                    button.text = text
                 else:
                     button.text = (
                         "✅ В избранном" if active else "⭐ В избранное"
