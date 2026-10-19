@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 import json
 import logging
+from pathlib import Path
 
 from aiohttp import web
 
@@ -13,8 +14,20 @@ from app.context import database, partner_registry
 logger = logging.getLogger(__name__)
 
 
+BANNER_PATH = Path(__file__).resolve().parent / "assets" / "list-banner.png"
+
+
 async def health(_: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
+
+
+async def list_banner(_: web.Request) -> web.StreamResponse:
+    if not BANNER_PATH.exists():
+        raise web.HTTPNotFound()
+    return web.FileResponse(
+        BANNER_PATH,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 async def event_go(request: web.Request) -> web.StreamResponse:
@@ -78,6 +91,7 @@ async def go(request: web.Request) -> web.StreamResponse:
 def create_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/health", health)
+    app.router.add_get("/static/list-banner.png", list_banner)
     app.router.add_get("/go/event/{token}", event_go)
     app.router.add_get("/go/{partner_id}", go)
     return app

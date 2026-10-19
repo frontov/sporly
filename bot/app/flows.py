@@ -46,6 +46,23 @@ logger = logging.getLogger(__name__)
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 PAGE_SIZE = 4
 LIST_BANNER_PATH = Path(__file__).resolve().parent / "assets" / "list-banner.png"
+_LIST_BANNER_FILE_ID: str | None = None
+
+
+def _banner_media():
+    from app.config import settings
+
+    if settings.public_base_url:
+        return (
+            f"{settings.public_base_url.rstrip('/')}/static/list-banner.png"
+        )
+    return _LIST_BANNER_FILE_ID or FSInputFile(LIST_BANNER_PATH)
+
+
+def _remember_banner(message: Message | None) -> None:
+    global _LIST_BANNER_FILE_ID
+    if _LIST_BANNER_FILE_ID is None and message is not None and message.photo:
+        _LIST_BANNER_FILE_ID = message.photo[-1].file_id
 
 
 # --------------------------------------------------------------------- screens
@@ -66,7 +83,7 @@ async def _send_screen(
     *,
     text: str,
     markup: InlineKeyboardMarkup | None = None,
-    photo: str | None = None,
+    photo=None,
     track: bool = True,
 ) -> Message | None:
     sent: Message | None = None
@@ -103,7 +120,7 @@ async def _edit_screen(
     *,
     text: str,
     markup: InlineKeyboardMarkup | None = None,
-    photo: str | None = None,
+    photo=None,
     photo_key: str | None = None,
     photo_failures: set[str] | None = None,
 ) -> Message | None:
@@ -329,14 +346,16 @@ async def render_search_page(
             ),
         )
 
-    return await _edit_screen(
+    sent = await _edit_screen(
         bot,
         chat_id,
         message,
         text=text,
         markup=markup,
-        photo=FSInputFile(LIST_BANNER_PATH),
+        photo=_banner_media(),
     )
+    _remember_banner(sent)
+    return sent
 
 
 async def start_search(
@@ -602,14 +621,16 @@ async def show_favorites(
         page=page,
         total_pages=total_pages,
     )
-    return await _edit_screen(
+    sent = await _edit_screen(
         bot,
         chat_id,
         message,
         text=text,
         markup=markup,
-        photo=FSInputFile(LIST_BANNER_PATH),
+        photo=_banner_media(),
     )
+    _remember_banner(sent)
+    return sent
 
 
 # ----------------------------------------------------------------- subscriptions
