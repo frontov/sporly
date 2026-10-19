@@ -12,6 +12,7 @@ services:
       CACHE_TTL_SECONDS: 300
       REFRESH_SCHEDULER_ENABLED: "true"
       REFRESH_INTERVAL_SECONDS: 1800
+      EVENT_MISS_THRESHOLD: 3
     volumes:
       - ./backend/app/data:/app/app/data
       - ./backend/app/config/sources.json:/app/app/config/sources.json:ro

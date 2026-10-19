@@ -10,7 +10,11 @@ class Event(BaseModel):
     source_label: str | None = None
     source_type: str | None = None
     registration_status: str | None = None
+    first_seen_at: str | None = None
+    last_seen_at: str | None = None
     last_checked_at: str | None = None
+    miss_count: int = 0
+    status: str = "active"
     distance_summary: str | None = None
     participation_format: str | None = None
     kids_available: bool | None = None

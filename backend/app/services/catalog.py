@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -695,7 +695,12 @@ class CatalogService:
             self._ensure_background_refresh()
         elif self._is_cache_stale():
             self._ensure_background_refresh()
-        return self._apply_sort(self._apply_filters(self._cache, filters), filters)
+        active_events = [
+            event for event in self._cache if event.status != "inactive"
+        ]
+        return self._apply_sort(
+            self._apply_filters(active_events, filters), filters
+        )
 
     def get_filter_metadata(self) -> tuple[list[str], list[str], list[str]]:
         return (
@@ -715,9 +720,15 @@ class CatalogService:
         return (time.time() - self._cache_created_at) > settings.cache_ttl_seconds
 
     async def _collect_events(self) -> list[Event]:
+        events, _, _ = await self._collect_events_with_source_counts()
+        return events
+
+    async def _collect_events_with_source_counts(
+        self,
+    ) -> tuple[list[Event], dict[str, int], set[str]]:
         source_configs = self._load_source_configs(settings.sources_file)
         if not source_configs:
-            return []
+            return [], {}, set()
 
         async with httpx.AsyncClient(
             headers={"User-Agent": settings.user_agent},
@@ -732,12 +743,18 @@ class CatalogService:
                 for source_config in source_configs
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            collected: list[Event] = []
-            for result in results:
-                if isinstance(result, Exception):
-                    continue
-                collected.extend(result)
-            return self._deduplicate(collected)
+
+        collected: list[Event] = []
+        source_counts: dict[str, int] = {}
+        configured_sources = {config.name for config in source_configs}
+        for source_config, result in zip(source_configs, results):
+            if isinstance(result, Exception):
+                source_counts[source_config.name] = 0
+                continue
+            source_counts[source_config.name] = len(result)
+            collected.extend(result)
+
+        return self._deduplicate(collected), source_counts, configured_sources
 
     async def _collect_source_events(
         self,
@@ -858,55 +875,73 @@ class CatalogService:
                 len(self._cache),
                 force,
             )
-            collected_events = await self._collect_events()
+            (
+                collected_events,
+                source_counts,
+                configured_sources,
+            ) = await self._collect_events_with_source_counts()
             if not collected_events:
+                logger.warning("No events collected; retrying once in 5s")
+                await asyncio.sleep(5)
+                (
+                    collected_events,
+                    source_counts,
+                    configured_sources,
+                ) = await self._collect_events_with_source_counts()
+
+            if not collected_events:
+                logger.warning("Skipping catalog refresh: no events collected")
                 return
 
-            normalized_events = self._normalize_events(collected_events)
-            if self._is_refresh_too_small(normalized_events):
-                logger.warning(
-                    "Refresh collected only %s fresh events vs %s cached; "
-                    "retrying once in 5s",
-                    len(normalized_events),
-                    len(self._cache),
+            empty_sources = sorted(
+                name
+                for name in configured_sources
+                if source_counts.get(name, 0) == 0
+            )
+            if empty_sources:
+                logger.info(
+                    "Sources with no events in this run: %s",
+                    ", ".join(empty_sources),
                 )
-                await asyncio.sleep(5)
 
-                retry_events = await self._collect_events()
-                if not retry_events:
-                    return
-
-                normalized_events = self._normalize_events(retry_events)
-                if self._is_refresh_too_small(normalized_events):
-                    logger.warning(
-                        "Skipping catalog refresh: %s fresh events vs %s cached "
-                        "(below %.0f%% threshold after retry)",
-                        len(normalized_events),
-                        len(self._cache),
-                        settings.minimum_refresh_ratio * 100,
-                    )
-                    return
+            normalized_events = self._normalize_events(collected_events)
+            active_cached_count = sum(
+                1 for event in self._cache if event.status != "inactive"
+            )
+            if (
+                active_cached_count
+                and len(normalized_events)
+                < active_cached_count * settings.minimum_refresh_ratio
+            ):
+                logger.warning(
+                    "Collected %s fresh events vs %s active cached events; "
+                    "proceeding with event-level merge",
+                    len(normalized_events),
+                    active_cached_count,
+                )
 
             previous_count = len(self._cache)
             self._cache_created_at = time.time()
-            next_events = self._apply_cache_metadata(
-                normalized_events, self._cache_created_at
-            )
-            configured_sources = {
-                config.name
-                for config in self._load_source_configs(settings.sources_file)
-            }
-            next_events = self._merge_stale_source_events(
-                next_events, configured_sources
+            checked_at = datetime.fromtimestamp(self._cache_created_at).isoformat()
+            next_events = self._merge_refreshed_events(
+                normalized_events,
+                checked_at,
+                source_counts,
             )
 
             self._cache = next_events
             self._cache_version = settings.cache_version
             self._rebuild_filter_metadata()
             self._write_persistent_cache()
+            active_count = sum(
+                1 for event in next_events if event.status != "inactive"
+            )
             logger.info(
-                "Catalog cache refreshed: %s events (was %s)",
+                "Catalog cache refreshed: %s events "
+                "(active=%s, inactive=%s, was=%s)",
                 len(next_events),
+                active_count,
+                len(next_events) - active_count,
                 previous_count,
             )
 
@@ -1010,47 +1045,48 @@ class CatalogService:
             "created_at": self._cache_created_at,
             "items": [event.model_dump(mode="json") for event in self._cache],
         }
-        cache_file.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        temp_file = cache_file.with_name(f"{cache_file.name}.tmp")
+        try:
+            temp_file.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            os.replace(temp_file, cache_file)
+        finally:
+            if temp_file.exists():
+                temp_file.unlink(missing_ok=True)
 
-    def _is_refresh_too_small(self, next_events: list[Event]) -> bool:
-        if not self._cache:
-            return False
-        refresh_ratio = len(next_events) / max(len(self._cache), 1)
-        return refresh_ratio < settings.minimum_refresh_ratio
-
-    def _merge_stale_source_events(
+    def _merge_refreshed_events(
         self,
         fresh_events: list[Event],
-        configured_sources: set[str],
+        checked_at: str,
+        source_counts: dict[str, int],
     ) -> list[Event]:
-        if not self._cache:
-            return fresh_events
+        previous = self._cache
+        if not previous:
+            return [
+                event.model_copy(
+                    update={
+                        "first_seen_at": checked_at,
+                        "last_seen_at": checked_at,
+                        "last_checked_at": checked_at,
+                        "miss_count": 0,
+                        "status": "active",
+                    }
+                )
+                for event in fresh_events
+            ]
 
-        current_counts = Counter(
-            event.source_name or "UNKNOWN" for event in self._cache
-        )
-        fresh_counts = Counter(
-            event.source_name or "UNKNOWN" for event in fresh_events
-        )
-
-        stale_sources: set[str] = set()
-        for source_name, current_count in current_counts.items():
-            if source_name not in configured_sources or current_count < 20:
-                continue
-            fresh_count = fresh_counts.get(source_name, 0)
-            if fresh_count == 0 or fresh_count / current_count < 0.5:
-                stale_sources.add(source_name)
-
-        if not stale_sources:
-            return fresh_events
-
-        logger.info(
-            "Preserving cached events for sources with a critical drop: %s",
-            ", ".join(sorted(stale_sources)),
-        )
+        threshold = max(settings.event_miss_threshold, 1)
+        old_by_url: dict[str, Event] = {}
+        old_by_signature: dict[tuple[str, str, str], Event] = {}
+        for event in previous:
+            source_url = self._canonical_source_url(str(event.source_url))
+            if source_url:
+                old_by_url.setdefault(source_url, event)
+            signature = self._semantic_dedupe_key(event)
+            if signature:
+                old_by_signature.setdefault(signature, event)
 
         fresh_urls = {
             self._canonical_source_url(str(event.source_url))
@@ -1062,34 +1098,76 @@ class CatalogService:
             if (signature := self._semantic_dedupe_key(event))
         }
 
-        merged = list(fresh_events)
-        for event in self._cache:
-            if event.source_name not in stale_sources:
-                continue
+        matched_old_ids: set[int] = set()
+        merged: list[Event] = []
 
+        for event in fresh_events:
             source_url = self._canonical_source_url(str(event.source_url))
-            if source_url and source_url in fresh_urls:
-                continue
+            old = old_by_url.get(source_url) if source_url else None
+            if old is None:
+                signature = self._semantic_dedupe_key(event)
+                if signature:
+                    old = old_by_signature.get(signature)
+            if old is not None:
+                matched_old_ids.add(id(old))
 
+            merged.append(
+                event.model_copy(
+                    update={
+                        "first_seen_at": (
+                            old.first_seen_at
+                            if old is not None and old.first_seen_at
+                            else checked_at
+                        ),
+                        "last_seen_at": checked_at,
+                        "last_checked_at": checked_at,
+                        "miss_count": 0,
+                        "status": "active",
+                    }
+                )
+            )
+
+        for event in previous:
+            source_url = self._canonical_source_url(str(event.source_url))
             signature = self._semantic_dedupe_key(event)
-            if signature and signature in fresh_signatures:
+            if source_url in fresh_urls or (
+                signature is not None and signature in fresh_signatures
+            ):
+                matched_old_ids.add(id(event))
                 continue
 
-            merged.append(event)
-            if source_url:
-                fresh_urls.add(source_url)
-            if signature:
-                fresh_signatures.add(signature)
+            if id(event) in matched_old_ids:
+                continue
+
+            if event.status == "inactive":
+                merged.append(event)
+                continue
+
+            source_name = event.source_name or "UNKNOWN"
+            if source_counts.get(source_name, 0) <= 0:
+                merged.append(event)
+                continue
+
+            miss_count = (event.miss_count or 0) + 1
+            status = "inactive" if miss_count >= threshold else "active"
+            merged.append(
+                event.model_copy(
+                    update={"miss_count": miss_count, "status": status}
+                )
+            )
 
         return merged
 
     def _rebuild_filter_metadata(self) -> None:
-        self._available_cities = self.build_available_cities(self._cache)
+        active_events = [
+            event for event in self._cache if event.status != "inactive"
+        ]
+        self._available_cities = self.build_available_cities(active_events)
         self._available_categories = sorted(
-            {event.category for event in self._cache if event.category}
+            {event.category for event in active_events if event.category}
         )
         self._available_sources = sorted(
-            {event.source_name for event in self._cache if event.source_name}
+            {event.source_name for event in active_events if event.source_name}
         )
 
     def _build_parser(self, source_config: SourceConfig) -> CssDirectoryParser:
@@ -1404,9 +1482,27 @@ class CatalogService:
         if not checked_at_iso:
             return events
         return [
-            event.model_copy(update={"last_checked_at": checked_at_iso})
-            if not event.last_checked_at
-            else event
+            event.model_copy(
+                update={
+                    "last_checked_at": event.last_checked_at or checked_at_iso,
+                    "first_seen_at": (
+                        event.first_seen_at
+                        or event.last_checked_at
+                        or checked_at_iso
+                    ),
+                    "last_seen_at": (
+                        event.last_seen_at
+                        or event.last_checked_at
+                        or checked_at_iso
+                    ),
+                    "miss_count": event.miss_count or 0,
+                    "status": (
+                        event.status
+                        if event.status in {"active", "inactive"}
+                        else "active"
+                    ),
+                }
+            )
             for event in events
         ]
 

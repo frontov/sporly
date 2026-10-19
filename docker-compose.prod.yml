@@ -18,6 +18,7 @@ services:
       MINIMUM_REFRESH_RATIO: ${MINIMUM_REFRESH_RATIO:-0.7}
       REFRESH_SCHEDULER_ENABLED: ${REFRESH_SCHEDULER_ENABLED:-true}
       REFRESH_INTERVAL_SECONDS: ${REFRESH_INTERVAL_SECONDS:-1800}
+      EVENT_MISS_THRESHOLD: ${EVENT_MISS_THRESHOLD:-3}
     volumes:
       - ./backend/app/data:/app/app/data
       - ./backend/app/config/sources.json:/app/app/config/sources.json:ro

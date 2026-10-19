@@ -7,7 +7,11 @@ export type EventItem = {
   source_label: string | null;
   source_type: string | null;
   registration_status: string | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
   last_checked_at: string | null;
+  miss_count: number;
+  status: "active" | "inactive";
   distance_summary: string | null;
   participation_format: string | null;
   kids_available: boolean | null;
