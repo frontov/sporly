@@ -170,6 +170,14 @@ async def cmd_start(
     await database.mark_onboarded(chat_id)
 
     event_token = payload[3:] if payload.startswith("ev_") else None
+    event_back: str | None = None
+    if payload.startswith("evl_"):
+        parts = payload.split("_")
+        if len(parts) >= 4:
+            event_token = parts[1]
+            event_back = f"back:s:{parts[2]}:{parts[3]}"
+        else:
+            event_token = None
     favorite_token = payload[4:] if payload.startswith("fav_") else None
     unfavorite_token = payload[6:] if payload.startswith("unfav_") else None
     referrer_id: int | None = None
@@ -219,7 +227,11 @@ async def cmd_start(
 
     if event_token:
         await show_single_event(
-            bot, chat_id, event_token, bot_username=bot_username
+            bot,
+            chat_id,
+            event_token,
+            bot_username=bot_username,
+            back_callback=event_back,
         )
     elif favorite_token:
         changed, _ = await toggle_favorite_by_token(

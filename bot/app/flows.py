@@ -296,6 +296,7 @@ async def render_search_page(
         filters=_session_summary(session),
         page_size=PAGE_SIZE,
         bot_username=bot_username,
+        session_id=session.id,
     )
     markup = search_list_keyboard(
         events=result.items,
@@ -803,6 +804,7 @@ async def show_single_event(
     message: Message | None = None,
     bot_username: str = "",
     prefix: str = "",
+    back_callback: str | None = None,
 ) -> Message | None:
     payload = await database.get_event_by_token(token)
     if payload is None:
@@ -832,6 +834,7 @@ async def show_single_event(
         is_favorite,
         bot_username,
         event.title,
+        back_callback=back_callback,
     )
     return await _edit_screen(
         bot,

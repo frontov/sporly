@@ -286,6 +286,7 @@ def single_event_keyboard(
     is_favorite: bool,
     bot_username: str,
     title: str | None = None,
+    back_callback: str | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [
@@ -310,7 +311,19 @@ def single_event_keyboard(
         actions.append(share)
     if actions:
         rows.append(actions)
-    rows.append([InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")])
+    if back_callback:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="⬅️ К списку", callback_data=back_callback
+                ),
+                InlineKeyboardButton(text="🏠", callback_data="menu:home"),
+            ]
+        )
+    else:
+        rows.append(
+            [InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")]
+        )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

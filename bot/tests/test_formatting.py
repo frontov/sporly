@@ -101,6 +101,18 @@ class FormattingTest(unittest.TestCase):
         self.assertIn("start=ev_", text)
         self.assertIn("Подробнее", text)
 
+        linked = format_event_list(
+            events,
+            total=1,
+            page=2,
+            total_pages=3,
+            page_size=4,
+            bot_username="sporly_bot",
+            session_id="abcd1234",
+        )
+        self.assertIn("start=evl_", linked)
+        self.assertIn("abcd1234_2", linked)
+
     def test_favorite_location(self) -> None:
         favorite = Favorite(
             chat_id=1,
