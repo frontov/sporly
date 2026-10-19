@@ -143,7 +143,6 @@ def search_list_keyboard(
     events: list[Event],
     tokens: dict[str, str],
     favorite_ids: set[str],
-    bot_username: str,
     session_id: str,
     page: int,
     total_pages: int,
@@ -152,35 +151,27 @@ def search_list_keyboard(
     partner_url: str | None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    offset = (page - 1) * 4
+    stars: list[InlineKeyboardButton] = []
     for index, event in enumerate(events, start=1):
         token = tokens.get(event.id)
         if not token:
             continue
         marker = EVENT_COLORS[(index - 1) % len(EVENT_COLORS)]
         is_favorite = event.id in favorite_ids
-        row = [
+        stars.append(
             InlineKeyboardButton(
-                text=(
-                    f"{marker} В избранном ✅"
-                    if is_favorite
-                    else f"{marker} В избранное ⭐"
-                ),
+                text=f"{marker} {'✅' if is_favorite else '⭐'}",
                 callback_data=(
                     f"unfv:{token}" if is_favorite else f"fv:{token}"
                 ),
             )
-        ]
-        share = _url_button(
-            f"{marker} Поделиться 📤",
-            share_url(bot_username, token, event.title),
         )
-        if share:
-            row.append(share)
-        rows.append(row)
+    if stars:
+        rows.append(stars)
 
+    nav: list[InlineKeyboardButton] = []
     if total_pages > 1:
-        rows.append(
+        nav.extend(
             [
                 InlineKeyboardButton(
                     text="‹", callback_data=f"page:{session_id}:prev"
@@ -193,6 +184,8 @@ def search_list_keyboard(
                 ),
             ]
         )
+    nav.append(InlineKeyboardButton(text="🏠", callback_data="menu:home"))
+    rows.append(nav)
 
     if can_subscribe:
         rows.append(
@@ -211,8 +204,6 @@ def search_list_keyboard(
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")])
-
     if partner and partner_url:
         button = _url_button(
             f"{partner.label} · {partner.title}"[:60], partner_url
@@ -227,7 +218,6 @@ def favorites_list_keyboard(
     *,
     favorites: list,
     tokens: dict[str, str],
-    bot_username: str,
     page: int,
     total_pages: int,
     page_size: int = 5,
@@ -235,7 +225,6 @@ def favorites_list_keyboard(
     rows: list[list[InlineKeyboardButton]] = []
     offset = (page - 1) * page_size
     actions: list[InlineKeyboardButton] = []
-    shares: list[InlineKeyboardButton] = []
     for index, favorite in enumerate(favorites, start=offset):
         token = tokens.get(favorite.event_id)
         if not token:
@@ -247,19 +236,12 @@ def favorites_list_keyboard(
                 callback_data=f"favrm:{index}:{token}",
             )
         )
-        share = _url_button(
-            f"{marker} Поделиться 📤",
-            share_url(bot_username, token, favorite.title),
-        )
-        if share:
-            shares.append(share)
     if actions:
         rows.append(actions)
-    if shares:
-        rows.append(shares)
 
+    nav: list[InlineKeyboardButton] = []
     if total_pages > 1:
-        rows.append(
+        nav.extend(
             [
                 InlineKeyboardButton(
                     text="‹", callback_data=f"favpg:{max(page - 1, 1)}"
@@ -272,12 +254,10 @@ def favorites_list_keyboard(
                 ),
             ]
         )
-
+    nav.append(InlineKeyboardButton(text="🏠", callback_data="menu:home"))
+    rows.append(nav)
     rows.append(
-        [
-            InlineKeyboardButton(text="🔍 Найти", callback_data="menu:find"),
-            InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home"),
-        ]
+        [InlineKeyboardButton(text="🔍 Найти", callback_data="menu:find")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

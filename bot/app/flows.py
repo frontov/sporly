@@ -294,12 +294,12 @@ async def render_search_page(
         total_pages=result.total_pages,
         filters=_session_summary(session),
         page_size=PAGE_SIZE,
+        bot_username=bot_username,
     )
     markup = search_list_keyboard(
         events=result.items,
         tokens=tokens,
         favorite_ids=favorites,
-        bot_username=bot_username,
         session_id=session.id,
         page=result.page,
         total_pages=result.total_pages,
@@ -482,7 +482,11 @@ async def show_favorites(
     ]
     text = f"<b>⭐ Избранное</b> · {len(favorites)}\n\n"
     text += "\n\n".join(
-        format_favorite(favorite, index=start + index)
+        format_favorite(
+            favorite,
+            index=start + index,
+            bot_username=bot_username,
+        )
         for index, favorite in enumerate(display_favorites, start=1)
     )
     text += "\n\nНапомним за 7, 3 и 1 день до старта."
@@ -490,7 +494,6 @@ async def show_favorites(
     markup = favorites_list_keyboard(
         favorites=visible,
         tokens=tokens,
-        bot_username=bot_username,
         page=page,
         total_pages=total_pages,
         page_size=FAVORITES_PAGE_SIZE,

@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from app.api_client import Event
 from app.storage import Favorite
+from app.links import event_token, share_url
 from app.text import EVENT_COLORS, countdown, format_date, pluralize
 
 
@@ -157,7 +158,11 @@ def format_event(event: Event, index: int | None = None) -> str:
     return "\n".join(lines)
 
 
-def format_favorite(favorite: Favorite, index: int | None = None) -> str:
+def format_favorite(
+    favorite: Favorite,
+    index: int | None = None,
+    bot_username: str = "",
+) -> str:
     title = escape(clean_text(favorite.title, 120))
     marker = (
         EVENT_COLORS[(index - 1) % len(EVENT_COLORS)] + " "
@@ -188,6 +193,14 @@ def format_favorite(favorite: Favorite, index: int | None = None) -> str:
         lines.append(f"📅 {escape(meta)}")
     if favorite.category:
         lines.append(f"🏁 {escape(clean_text(favorite.category, 40))}")
+    if bot_username:
+        share = share_url(
+            bot_username, event_token(favorite.event_id), favorite.title
+        )
+        if share:
+            lines.append(
+                f'<a href="{escape(share, quote=True)}">📤 Поделиться</a>'
+            )
     return "\n".join(lines)
 
 
@@ -200,6 +213,7 @@ def format_event_list(
     filters: str | None = None,
     title: str = "Ближайшие старты",
     page_size: int = 4,
+    bot_username: str = "",
 ) -> str:
     header = f"<b>{title}</b>\n"
     if filters:
@@ -237,6 +251,15 @@ def format_event_list(
             card += f"\n📅 {escape(meta)}"
         if facts_line:
             card += f"\n🏁 {escape(facts_line)}"
+        if bot_username:
+            share = share_url(
+                bot_username, event_token(event.id), event.title
+            )
+            if share:
+                card += (
+                    f'\n<a href="{escape(share, quote=True)}">'
+                    "📤 Поделиться</a>"
+                )
         cards.append(card)
 
     text = header
