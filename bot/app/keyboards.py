@@ -146,7 +146,6 @@ def search_list_keyboard(
     session_id: str,
     page: int,
     total_pages: int,
-    can_subscribe: bool,
     partner: Partner | None,
     partner_url: str | None,
 ) -> InlineKeyboardMarkup:
@@ -187,23 +186,6 @@ def search_list_keyboard(
     nav.append(InlineKeyboardButton(text="🏠", callback_data="menu:home"))
     rows.append(nav)
 
-    if can_subscribe:
-        rows.append(
-            [
-                InlineKeyboardButton(text="🎛 Интересы", callback_data="menu:sub"),
-                InlineKeyboardButton(
-                    text="🔔 Следить", callback_data=f"subf:{session_id}"
-                ),
-            ]
-        )
-    else:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🎯 Настроить интересы", callback_data="menu:sub"
-                )
-            ]
-        )
     if partner and partner_url:
         button = _url_button(
             f"{partner.label} · {partner.title}"[:60], partner_url

@@ -303,7 +303,6 @@ async def render_search_page(
         session_id=session.id,
         page=result.page,
         total_pages=result.total_pages,
-        can_subscribe=bool(session.cities or session.categories),
         partner=partner,
         partner_url=partner_url,
     )
