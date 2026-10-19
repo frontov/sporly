@@ -226,6 +226,18 @@ async def cmd_start(
         return
 
     if event_token:
+        if event_back:
+            previous = await database.get_ui_message(chat_id)
+            if previous:
+                try:
+                    await bot.delete_message(chat_id, previous)
+                except Exception:
+                    pass
+                await database.clear_ui_message(chat_id)
+            try:
+                await message.delete()
+            except Exception:
+                pass
         await show_single_event(
             bot,
             chat_id,

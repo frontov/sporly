@@ -64,10 +64,12 @@ async def _send_screen(
     text: str,
     markup: InlineKeyboardMarkup | None = None,
     photo: str | None = None,
+    track: bool = True,
 ) -> Message | None:
+    sent: Message | None = None
     if photo:
         try:
-            return await bot.send_photo(
+            sent = await bot.send_photo(
                 chat_id,
                 photo=photo,
                 caption=text,
@@ -75,16 +77,20 @@ async def _send_screen(
             )
         except Exception as error:
             logger.info("Cannot send photo %s: %s", photo, error)
-    try:
-        return await bot.send_message(
-            chat_id,
-            text,
-            reply_markup=markup,
-            link_preview_options=NO_PREVIEW,
-        )
-    except Exception:
-        logger.exception("Cannot send screen to %s", chat_id)
-        return None
+    if sent is None:
+        try:
+            sent = await bot.send_message(
+                chat_id,
+                text,
+                reply_markup=markup,
+                link_preview_options=NO_PREVIEW,
+            )
+        except Exception:
+            logger.exception("Cannot send screen to %s", chat_id)
+            return None
+    if track and sent is not None:
+        await database.set_ui_message(chat_id, sent.message_id)
+    return sent
 
 
 async def _edit_screen(
@@ -870,6 +876,7 @@ async def send_event_card(
             event.title,
         ),
         photo=pick_image(event),
+        track=False,
     )
 
 

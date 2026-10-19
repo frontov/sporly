@@ -83,6 +83,14 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         payload = await self.db.get_event_by_token(token)
         self.assertEqual(payload["title"], "Событие")
 
+    async def test_ui_message_marker(self) -> None:
+        await self.db.ensure_user(1)
+        self.assertIsNone(await self.db.get_ui_message(1))
+        await self.db.set_ui_message(1, 777)
+        self.assertEqual(await self.db.get_ui_message(1), 777)
+        await self.db.clear_ui_message(1)
+        self.assertIsNone(await self.db.get_ui_message(1))
+
     async def test_partner_counters(self) -> None:
         await self.db.ensure_user(1)
         await self.db.record_partner_impression("partner", 1)

@@ -284,6 +284,12 @@ class Database:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS ui_messages (
+                    chat_id INTEGER PRIMARY KEY,
+                    message_id INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             user_columns = {
@@ -950,6 +956,42 @@ class Database:
                 (chat_id, kind, payload, utc_now()),
             )
             connection.commit()
+
+    async def set_ui_message(self, chat_id: int, message_id: int) -> None:
+        await asyncio.to_thread(self._set_ui_message_sync, chat_id, message_id)
+
+    def _set_ui_message_sync(self, chat_id: int, message_id: int) -> None:
+        with self._db() as connection:
+            connection.execute(
+                """
+                INSERT INTO ui_messages (chat_id, message_id, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    message_id = excluded.message_id,
+                    updated_at = excluded.updated_at
+                """,
+                (chat_id, message_id, utc_now()),
+            )
+
+    async def get_ui_message(self, chat_id: int) -> int | None:
+        return await asyncio.to_thread(self._get_ui_message_sync, chat_id)
+
+    def _get_ui_message_sync(self, chat_id: int) -> int | None:
+        with self._db() as connection:
+            row = connection.execute(
+                "SELECT message_id FROM ui_messages WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+        return int(row["message_id"]) if row else None
+
+    async def clear_ui_message(self, chat_id: int) -> None:
+        await asyncio.to_thread(self._clear_ui_message_sync, chat_id)
+
+    def _clear_ui_message_sync(self, chat_id: int) -> None:
+        with self._db() as connection:
+            connection.execute(
+                "DELETE FROM ui_messages WHERE chat_id = ?", (chat_id,)
+            )
 
     async def interactions_today(self, chat_id: int, kind: str) -> int:
         return await asyncio.to_thread(
