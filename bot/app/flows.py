@@ -539,7 +539,7 @@ async def back_to_search(
 ) -> Message | None:
     session = search_sessions.get(session_id)
     if session is None or session.chat_id != chat_id:
-        return await start_search(bot, chat_id, bot_username=bot_username)
+        return await start_nearest(bot, chat_id, bot_username=bot_username)
     return await render_search_page(
         bot,
         chat_id,

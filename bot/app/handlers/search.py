@@ -76,7 +76,7 @@ async def card_navigation(
     if error:
         if "устарела" in error:
             await callback.answer("Обновляю выдачу")
-            await start_search(
+            await start_nearest(
                 bot,
                 callback.from_user.id,
                 bot_username=bot_username,
@@ -99,7 +99,7 @@ async def legacy_pager(
         await callback.answer()
         return
     await callback.answer("Обновляю выдачу")
-    await start_search(bot, callback.from_user.id, bot_username=bot_username)
+    await start_nearest(bot, callback.from_user.id, bot_username=bot_username)
 
 
 @router.callback_query(F.data.startswith("detail:"))
