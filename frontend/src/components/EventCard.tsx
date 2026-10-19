@@ -100,6 +100,7 @@ export const EventCard = ({ event, showDetails }: EventCardProps) => {
       ? null
       : event.description;
   const cardClass = `event-card--${slugifyCategory(categoryLabel)}`;
+  const featuredCardClass = event.is_featured ? "event-card--featured" : "";
   const categoryClass = `event-card__category--${slugifyCategory(categoryLabel)}`;
   const seriesCardClass = event.series_slug ? `event-card--${event.series_slug.replace(/_/g, "-")}` : "";
   const registrationChip = event.registration_status
@@ -136,7 +137,7 @@ export const EventCard = ({ event, showDetails }: EventCardProps) => {
 
   return (
     <article
-      className={`event-card ${cardClass} ${seriesCardClass}`}
+      className={`event-card ${cardClass} ${seriesCardClass} ${featuredCardClass}`}
     >
       <a
         className="event-card__anchor"
@@ -160,6 +161,15 @@ export const EventCard = ({ event, showDetails }: EventCardProps) => {
 
         <div className="event-card__content">
           <div className="event-card__meta">
+            {event.is_featured ? (
+              <span
+                className="event-card__featured"
+                aria-label={event.featured_label || "Рекомендовано Sporly"}
+                title={event.featured_label || "Рекомендовано Sporly"}
+              >
+                <span aria-hidden="true">★</span>
+              </span>
+            ) : null}
             <span className={`event-card__category ${categoryClass}`}>
               {categoryLabel}
             </span>

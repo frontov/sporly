@@ -180,6 +180,9 @@ export const CalendarPage = () => {
             <a className="hero__nav-link" {...navigateLinkProps("/", navigate)}>
               На главную
             </a>
+            <a className="hero__nav-link" {...navigateLinkProps("/featured", navigate)}>
+              Рекомендуем
+            </a>
           </nav>
         </div>
         <p className="hero__brand-text">календарь спортивных событий</p>

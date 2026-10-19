@@ -15,6 +15,9 @@ class Event(BaseModel):
     last_checked_at: str | None = None
     miss_count: int = 0
     status: str = "active"
+    is_featured: bool = False
+    featured_label: str | None = None
+    featured_priority: int = 0
     distance_summary: str | None = None
     participation_format: str | None = None
     kids_available: bool | None = None

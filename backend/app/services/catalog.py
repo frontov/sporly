@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 from urllib.parse import urlparse, urlunparse
@@ -50,6 +50,7 @@ from app.parsers.base import (
     XCNewsParser,
 )
 from app.schemas.event import Event
+from app.services.featured import FeaturedEntry, FeaturedEventStore
 from app.settings import settings
 
 
@@ -62,6 +63,7 @@ class EventFilters:
     cities: list[str] | None = None
     categories: list[str] | None = None
     recommended: bool = False
+    featured_only: bool = False
     registration_status: str | None = None
     kids_only: bool = False
     surface_type: str | None = None
@@ -69,7 +71,20 @@ class EventFilters:
     source: str | None = None
     date_from: str | None = None
     date_to: str | None = None
+    first_seen_after: str | None = None
     sort_by: str | None = None
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 class CatalogService:
@@ -688,6 +703,7 @@ class CatalogService:
         self._refresh_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task[None] | None = None
         self._scheduler_task: asyncio.Task[None] | None = None
+        self._featured_store = FeaturedEventStore(settings.featured_events_file)
         self._load_persistent_cache()
 
     async def get_events(self, filters: EventFilters) -> list[Event]:
@@ -928,6 +944,7 @@ class CatalogService:
                 checked_at,
                 source_counts,
             )
+            next_events = self._apply_featured_flags(next_events)
 
             self._cache = next_events
             self._cache_version = settings.cache_version
@@ -1027,6 +1044,7 @@ class CatalogService:
             self._cache_created_at = float(created_at)
             if self._cache_created_at:
                 self._cache = self._apply_cache_metadata(self._cache, self._cache_created_at)
+            self._cache = self._apply_featured_flags(self._cache)
             self._cache_version = cache_version
             self._rebuild_filter_metadata()
         except (json.JSONDecodeError, OSError, ValueError, TypeError):
@@ -1157,6 +1175,103 @@ class CatalogService:
             )
 
         return merged
+
+    def _apply_featured_flags(self, events: list[Event]) -> list[Event]:
+        updated: list[Event] = []
+        for event in events:
+            canonical_url = self._canonical_source_url(str(event.source_url))
+            semantic_key = self._semantic_dedupe_key(event)
+            entry = self._featured_store.match(
+                event, canonical_url, semantic_key
+            )
+            if entry is None:
+                updated.append(
+                    event.model_copy(
+                        update={
+                            "is_featured": False,
+                            "featured_label": None,
+                            "featured_priority": 0,
+                        }
+                    )
+                )
+                continue
+            updated.append(
+                event.model_copy(
+                    update={
+                        "is_featured": True,
+                        "featured_label": entry.label,
+                        "featured_priority": entry.priority,
+                    }
+                )
+            )
+        return updated
+
+    def find_cached_event(
+        self,
+        event_id: str | None = None,
+        source_url: str | None = None,
+    ) -> Event | None:
+        canonical_url = (
+            self._canonical_source_url(source_url) if source_url else ""
+        )
+        for event in self._cache:
+            if event_id and event.id == event_id:
+                return event
+            if (
+                canonical_url
+                and self._canonical_source_url(str(event.source_url))
+                == canonical_url
+            ):
+                return event
+        return None
+
+    def feature_event(
+        self,
+        *,
+        event_id: str | None,
+        source_url: str | None,
+        label: str,
+        priority: int,
+        until: str | None,
+        enabled: bool = True,
+    ) -> tuple[FeaturedEntry, Event]:
+        event = self.find_cached_event(event_id=event_id, source_url=source_url)
+        if event is None:
+            raise ValueError("event not found")
+
+        canonical_url = self._canonical_source_url(str(event.source_url))
+        semantic_key = self._semantic_dedupe_key(event)
+        entry = self._featured_store.upsert(
+            event,
+            canonical_url,
+            semantic_key,
+            label=label,
+            priority=priority,
+            until=until or None,
+            enabled=enabled,
+        )
+        self._cache = self._apply_featured_flags(self._cache)
+        self._write_persistent_cache()
+        featured_event = self.find_cached_event(event_id=event.id) or event
+        return entry, featured_event
+
+    def unfeature_event(self, entry_id: str) -> bool:
+        if not self._featured_store.delete(entry_id):
+            return False
+        self._cache = self._apply_featured_flags(self._cache)
+        self._write_persistent_cache()
+        return True
+
+    def list_featured(self) -> list[FeaturedEntry]:
+        return self._featured_store.all()
+
+    async def force_refresh(self) -> None:
+        await self._refresh_cache(force=True)
+
+    def cache_age_seconds(self) -> float | None:
+        if not self._cache_created_at:
+            return None
+        return time.time() - self._cache_created_at
 
     def _rebuild_filter_metadata(self) -> None:
         active_events = [
@@ -2152,6 +2267,11 @@ class CatalogService:
                 if event.series_slug is not None
             ]
 
+        if filters.featured_only:
+            filtered = [
+                event for event in filtered if event.is_featured
+            ]
+
         if filters.registration_status:
             status = filters.registration_status.casefold().strip()
             filtered = [
@@ -2203,18 +2323,33 @@ class CatalogService:
                 if event.starts_at is None or event.starts_at[:10] <= filters.date_to
             ]
 
+        if filters.first_seen_after:
+            cutoff = _parse_iso_datetime(filters.first_seen_after)
+            if cutoff is not None:
+                filtered = [
+                    event
+                    for event in filtered
+                    if (seen_at := _parse_iso_datetime(event.first_seen_at))
+                    is not None
+                    and seen_at >= cutoff
+                ]
+
         return filtered
 
     def _apply_sort(self, events: list[Event], filters: EventFilters) -> list[Event]:
         sort_by = filters.sort_by or "date_asc"
-        sorted_events = sorted(
-            events,
-            key=lambda item: (
+        reverse = sort_by == "date_desc"
+
+        def date_key(item: Event) -> tuple[bool, str, str]:
+            return (
                 item.starts_at is None,
                 item.starts_at or "",
                 item.title.lower(),
-            ),
-        )
-        if sort_by == "date_desc":
-            sorted_events.reverse()
-        return sorted_events
+            )
+
+        featured = [event for event in events if event.is_featured]
+        regular = [event for event in events if not event.is_featured]
+        featured.sort(key=date_key, reverse=reverse)
+        featured.sort(key=lambda event: -(event.featured_priority or 0))
+        regular.sort(key=date_key, reverse=reverse)
+        return [*featured, *regular]

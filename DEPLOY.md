@@ -79,6 +79,13 @@ cp .env.prod.example .env.prod
 ```env
 DOMAIN=sporly.ru
 
+BOT_TOKEN=<токен от @BotFather>
+ADMIN_TELEGRAM_IDS=<ваш telegram id>
+ADMIN_TOKEN=<длинный случайный токен для админ-API>
+PARTNER_CONTACT=@fronteno
+POLL_INTERVAL_SECONDS=900
+DIGEST_HOUR_UTC=6
+
 CACHE_TTL_SECONDS=300
 REQUEST_TIMEOUT_SECONDS=15
 SOURCE_TIMEOUT_SECONDS=45
@@ -215,4 +222,6 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up --build -d
 - `Caddy` обслуживает HTTPS
 - frontend проксирует `/api` в backend
 - backend работает внутри docker-сети
+- Telegram-бот запускается в контейнере `sporly-bot`
+- `/go/<partner>` проксируется через nginx в бот и считает партнёрские переходы
 - стек автоматически стартует после reboot

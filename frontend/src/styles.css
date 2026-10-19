@@ -722,6 +722,27 @@ a {
   margin-bottom: 0;
 }
 
+.featured-intro {
+  margin: 26px auto 8px;
+  max-width: 74ch;
+  padding: 0 22px;
+  text-align: left;
+}
+
+.featured-intro h2 {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 1.2rem;
+  letter-spacing: -0.025em;
+}
+
+.featured-intro p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
 .state-banner--error {
   border-color: rgba(255, 127, 127, 0.35);
 }
@@ -986,6 +1007,35 @@ a {
 .event-card__meta {
   min-height: 28px;
   padding-right: 138px;
+}
+
+.event-card--featured {
+  border-color: rgba(191, 145, 0, 0.32);
+  background:
+    radial-gradient(circle at top right, rgba(255, 198, 0, 0.14), transparent 38%),
+    var(--surface);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 198, 0, 0.14),
+    var(--shadow-soft);
+}
+
+.event-card--featured::before {
+  background: linear-gradient(90deg, rgba(196, 143, 0, 0.98), rgba(255, 214, 92, 0.78));
+}
+
+.event-card__featured {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 50%;
+  background: rgba(255, 198, 0, 0.2);
+  color: #a97800;
+  font-size: 0.78rem;
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px rgba(191, 145, 0, 0.26);
 }
 
 .event-card__series {

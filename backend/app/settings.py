@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     refresh_interval_seconds: int = 1800
     event_miss_threshold: int = 3
     cache_file: Path = BASE_DIR / "data" / "events_cache.json"
+    featured_events_file: Path = BASE_DIR / "data" / "featured_events.json"
+    admin_token: str = ""
     user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"

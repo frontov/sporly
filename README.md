@@ -6,6 +6,7 @@
 
 - `backend/` - FastAPI + парсеры сайтов + JSON-кэш каталога.
 - `frontend/` - React + TypeScript + Vite.
+- `bot/` - Telegram-бот: поиск, подписки, уведомления, напоминания и партнёрские размещения.
 - `docker-compose.yml` - production-ready локальный деплой через Docker Compose.
 
 ## Что умеет приложение
@@ -41,6 +42,26 @@ npm run dev
 
 Frontend будет доступен на `http://localhost:5173`.
 
+### Telegram bot
+
+Подробная инструкция: `bot/README.md`.
+
+```bash
+cd bot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# укажите BOT_TOKEN
+python -m app.main
+```
+
+При первом запуске бот спрашивает интересные виды спорта и регионы.
+«Ближайшие» показывает только эту подборку, изменить её можно в «Мои интересы».
+Бот также присылает новые события по подписке и напоминает об избранных.
+Монетизация — партнёрские слоты в поиске и дайджесте
+(`bot/app/config/partners.json`).
+
 ## Деплой через Docker Compose
 
 Самый простой production-сценарий:
@@ -53,6 +74,7 @@ docker compose up --build -d
 
 - frontend: `http://localhost:8080`
 - backend внутри compose-сети: `http://backend:8000`
+- bot: работает внутри compose-сети и слушает `8080` для партнёрских редиректов
 
 ### Что входит в production-конфиг
 
@@ -108,7 +130,8 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up --build -d
 
 - `Caddy` принимает внешний HTTPS-трафик;
 - `frontend` обслуживает SPA и проксирует `/api` в backend;
-- `backend` работает только внутри docker-сети и наружу не публикуется.
+- `backend` работает только внутри docker-сети и наружу не публикуется;
+- `bot` ходит в backend по внутренней сети, а `/go/` проксируется через nginx для учёта партнёрских переходов.
 
 ## Ubuntu VPS + auto-start
 
@@ -142,6 +165,7 @@ sudo systemctl start sporly
 - `REFRESH_SCHEDULER_ENABLED`
 - `REFRESH_INTERVAL_SECONDS`
 - `EVENT_MISS_THRESHOLD`
+- `ADMIN_TOKEN`
 
 Для локальной разработки:
 
@@ -164,6 +188,47 @@ cp backend/.env.example backend/.env
 1. Добавьте источник в `sources.json`.
 2. Если DOM нестандартный, добавьте отдельный парсер в `backend/app/parsers/base.py`.
 3. Подключите его в `backend/app/services/catalog.py`.
+
+## Рекомендованные и партнёрские старты
+
+Админ может отметить старт как рекомендованный. Такие события получают бейдж
+`Рекомендовано Sporly`, поднимаются в начало выдачи (приоритет выше даты) и
+доступны через отдельный публичный эндпоинт.
+
+Защита админ-эндпоинтов — заголовок `X-Admin-Token`, значение задаётся в
+`ADMIN_TOKEN`. Если токен не задан, админ-эндпоинты отвечают `403`.
+
+Основные методы:
+
+```http
+GET  /api/admin/events?q=марафон&date_from=2026-10-19&limit=50
+GET  /api/admin/featured
+POST /api/admin/featured
+DELETE /api/admin/featured/{entry_id}
+GET  /api/events/featured
+```
+
+Пример отметки события:
+
+```bash
+curl -X POST https://sporly.ru/api/admin/featured \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_id": "getrun-1-db58875133a2",
+    "label": "Рекомендовано Sporly",
+    "priority": 100
+  }'
+```
+
+Можно передать `source_url` вместо `event_id`. Поле `until` задаёт дату, после
+которой отметка перестаёт действовать. Отметки хранятся в
+`backend/app/data/featured_events.json` и переживают обновления кэша.
+
+Публичный эндпоинт `GET /api/events/featured` отдаёт только рекомендованные
+предстоящие события в формате обычного списка `/api/events`. На сайте они
+отмечены звёздочкой и доступны отдельным списком по пункту меню
+«Рекомендуем» (`/featured`).
 
 ## Кэширование
 

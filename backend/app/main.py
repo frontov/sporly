@@ -3,11 +3,13 @@ from datetime import datetime
 from html import escape
 import json
 import logging
+import secrets
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
+from pydantic import BaseModel
 
 from app.schemas.event import CalendarEvent, CalendarEventsResponse, EventsResponse
 from app.services.catalog import CatalogService, EventFilters
@@ -48,6 +50,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
+
+class FeatureEventRequest(BaseModel):
+    event_id: str | None = None
+    source_url: str | None = None
+    label: str = "Рекомендовано Sporly"
+    priority: int = 100
+    until: str | None = None
+    enabled: bool = True
+
+
+def _require_admin(x_admin_token: str | None) -> None:
+    expected = settings.admin_token
+    if (
+        not expected
+        or not x_admin_token
+        or not secrets.compare_digest(x_admin_token, expected)
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
 
 CYRILLIC_TO_LATIN = {
     "а": "a",
@@ -421,6 +443,111 @@ async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/admin/status")
+async def admin_status(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    events = await catalog_service.get_events(filters=EventFilters())
+    return {
+        "is_loading": catalog_service.is_loading(),
+        "cache_age_seconds": catalog_service.cache_age_seconds(),
+        "total_events": len(events),
+        "featured_count": len(
+            [entry for entry in catalog_service.list_featured() if entry.is_active()]
+        ),
+    }
+
+
+@app.get("/api/admin/events")
+async def admin_events(
+    q: str | None = None,
+    date_from: str | None = None,
+    featured_only: bool = False,
+    limit: int = 50,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    events = await catalog_service.get_events(
+        filters=EventFilters(
+            query=q,
+            date_from=date_from,
+            featured_only=featured_only,
+            sort_by="date_asc",
+        )
+    )
+    safe_limit = min(max(limit, 1), 200)
+    return {
+        "items": [
+            event.model_dump(mode="json") for event in events[:safe_limit]
+        ],
+        "total": len(events),
+    }
+
+
+@app.get("/api/admin/featured")
+async def admin_featured_list(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    return {
+        "items": [
+            entry.to_dict() for entry in catalog_service.list_featured()
+        ]
+    }
+
+
+@app.post("/api/admin/featured")
+async def admin_feature_event(
+    payload: FeatureEventRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    if not payload.event_id and not payload.source_url:
+        raise HTTPException(
+            status_code=400,
+            detail="event_id or source_url is required",
+        )
+    try:
+        entry, event = catalog_service.feature_event(
+            event_id=payload.event_id,
+            source_url=payload.source_url,
+            label=payload.label,
+            priority=payload.priority,
+            until=payload.until,
+            enabled=payload.enabled,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {
+        "item": entry.to_dict(),
+        "event": event.model_dump(mode="json"),
+    }
+
+
+@app.delete("/api/admin/featured/{entry_id}")
+async def admin_unfeature_event(
+    entry_id: str,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    _require_admin(x_admin_token)
+    if not catalog_service.unfeature_event(entry_id):
+        raise HTTPException(status_code=404, detail="featured event not found")
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/refresh")
+async def admin_refresh(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    await catalog_service.force_refresh()
+    return {
+        "status": "ok",
+        "cache_age_seconds": catalog_service.cache_age_seconds(),
+    }
+
+
 @app.get("/sitemap.xml")
 async def sitemap_xml() -> Response:
     available_cities, available_categories, _ = catalog_service.get_filter_metadata()
@@ -515,38 +642,11 @@ async def seo_sport(category_slug: str) -> HTMLResponse:
     )
 
 
-@app.get("/api/events", response_model=EventsResponse)
-async def list_events(
-    q: str | None = None,
-    city: list[str] | None = Query(default=None),
-    category: list[str] | None = Query(default=None),
-    recommended: bool = False,
-    registration_status: str | None = None,
-    kids_only: bool = False,
-    surface_type: str | None = None,
-    difficulty_level: str | None = None,
-    source: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    sort_by: str | None = None,
-    page: int = 1,
-    page_size: int = 24,
+def _events_response(
+    events: list,
+    page: int,
+    page_size: int,
 ) -> EventsResponse:
-    filters = EventFilters(
-        query=q,
-        cities=city,
-        categories=category,
-        recommended=recommended,
-        registration_status=registration_status,
-        kids_only=kids_only,
-        surface_type=surface_type,
-        difficulty_level=difficulty_level,
-        source=source,
-        date_from=date_from,
-        date_to=date_to,
-        sort_by=sort_by,
-    )
-    events = await catalog_service.get_events(filters=filters)
     available_cities, available_categories, available_sources = (
         catalog_service.get_filter_metadata()
     )
@@ -556,11 +656,9 @@ async def list_events(
     safe_page = min(max(page, 1), total_pages)
     start = (safe_page - 1) * safe_page_size
     end = start + safe_page_size
-    paged_events = events[start:end]
-    is_loading = catalog_service.is_loading()
     return EventsResponse(
-        items=paged_events,
-        is_loading=is_loading,
+        items=events[start:end],
+        is_loading=catalog_service.is_loading(),
         total=total,
         total_regions=len({event.region for event in events if event.region}),
         total_categories=len({event.category for event in events if event.category}),
@@ -571,6 +669,67 @@ async def list_events(
         available_categories=available_categories,
         available_sources=available_sources,
     )
+
+
+@app.get("/api/events", response_model=EventsResponse)
+async def list_events(
+    q: str | None = None,
+    city: list[str] | None = Query(default=None),
+    category: list[str] | None = Query(default=None),
+    recommended: bool = False,
+    featured: bool = False,
+    registration_status: str | None = None,
+    kids_only: bool = False,
+    surface_type: str | None = None,
+    difficulty_level: str | None = None,
+    source: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    first_seen_after: str | None = None,
+    sort_by: str | None = None,
+    page: int = 1,
+    page_size: int = 24,
+) -> EventsResponse:
+    filters = EventFilters(
+        query=q,
+        cities=city,
+        categories=category,
+        recommended=recommended,
+        featured_only=featured,
+        registration_status=registration_status,
+        kids_only=kids_only,
+        surface_type=surface_type,
+        difficulty_level=difficulty_level,
+        source=source,
+        date_from=date_from,
+        date_to=date_to,
+        first_seen_after=first_seen_after,
+        sort_by=sort_by,
+    )
+    events = await catalog_service.get_events(filters=filters)
+    return _events_response(events, page, page_size)
+
+
+@app.get("/api/events/featured", response_model=EventsResponse)
+async def featured_events(
+    city: list[str] | None = Query(default=None),
+    category: list[str] | None = Query(default=None),
+    date_from: str | None = None,
+    date_to: str | None = None,
+    page: int = 1,
+    page_size: int = 24,
+) -> EventsResponse:
+    events = await catalog_service.get_events(
+        filters=EventFilters(
+            cities=city,
+            categories=category,
+            featured_only=True,
+            date_from=date_from or datetime.now().date().isoformat(),
+            date_to=date_to,
+            sort_by="date_asc",
+        )
+    )
+    return _events_response(events, page, page_size)
 
 
 @app.get("/api/events/calendar", response_model=CalendarEventsResponse)

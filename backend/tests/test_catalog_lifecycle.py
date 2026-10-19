@@ -103,6 +103,29 @@ class CatalogLifecycleTest(unittest.TestCase):
 
         self.assertEqual([event.id for event in visible], ["A-6"])
 
+    def test_first_seen_after_filter(self) -> None:
+        older = make_event(1)
+        older.first_seen_at = "2026-10-19T09:00:00"
+        newer = make_event(2)
+        newer.first_seen_at = "2026-10-19T11:00:00"
+
+        filtered = self.service._apply_filters(
+            [older, newer],
+            EventFilters(first_seen_after="2026-10-19T10:00:00+00:00"),
+        )
+
+        self.assertEqual([event.id for event in filtered], ["A-2"])
+
+    def test_first_seen_after_filter_keeps_missing_timestamps_out(self) -> None:
+        no_timestamp = make_event(1)
+
+        filtered = self.service._apply_filters(
+            [no_timestamp],
+            EventFilters(first_seen_after="2026-10-19T10:00:00+00:00"),
+        )
+
+        self.assertEqual(filtered, [])
+
 
 if __name__ == "__main__":
     unittest.main()

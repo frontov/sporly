@@ -12,6 +12,9 @@ export type EventItem = {
   last_checked_at: string | null;
   miss_count: number;
   status: "active" | "inactive";
+  is_featured: boolean;
+  featured_label: string | null;
+  featured_priority: number;
   distance_summary: string | null;
   participation_format: string | null;
   kids_available: boolean | null;

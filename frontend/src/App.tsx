@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { normalizeCategoryLabel } from "./categories";
 import { CalendarPage } from "./CalendarPage";
 import { EventCard } from "./components/EventCard";
+import { FeaturedPage } from "./FeaturedPage";
 import { FiltersPanel } from "./components/FiltersPanel";
 import { useEvents } from "./hooks/useEvents";
 import { navigateLinkProps, useRoute } from "./hooks/useRoute";
@@ -91,6 +92,10 @@ function App() {
     return <CalendarPage />;
   }
 
+  if (path === "/featured") {
+    return <FeaturedPage />;
+  }
+
   return <CatalogPage />;
 }
 
@@ -127,6 +132,9 @@ function CatalogPage() {
             <h1>sporly</h1>
           </div>
           <nav className="hero__nav">
+            <a className="hero__nav-link" {...navigateLinkProps("/featured", navigate)}>
+              Рекомендуем
+            </a>
             <a className="hero__nav-link" {...navigateLinkProps("/calendar", navigate)}>
               Календарь
             </a>
