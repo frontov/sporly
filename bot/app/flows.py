@@ -20,12 +20,14 @@ from app.formatting import (
     clean_text,
     filters_summary,
     format_event_card,
+    format_event_details,
     format_event_list,
     format_favorite,
     pick_image,
 )
-from app.links import event_click_url
+from app.links import event_click_url, share_url
 from app.keyboards import (
+    event_detail_keyboard,
     favorites_list_keyboard,
     no_results_keyboard,
     search_list_keyboard,
@@ -35,7 +37,7 @@ from app.keyboards import (
 from app.partners import Partner
 from app.sessions import SearchSession
 from app.storage import Subscription
-from app.text import REMINDER_OFFSETS, days_until, pluralize
+from app.text import EVENT_COLORS, REMINDER_OFFSETS, days_until, pluralize
 
 
 logger = logging.getLogger(__name__)
@@ -269,7 +271,6 @@ async def render_search_page(
         )
 
     tokens = await _event_tokens(result.items)
-    favorites = await _favorite_ids(chat_id)
     partner, partner_url = await _find_partner(
         chat_id,
         placement="search",
@@ -294,12 +295,10 @@ async def render_search_page(
         total_pages=result.total_pages,
         filters=_session_summary(session),
         page_size=PAGE_SIZE,
-        bot_username=bot_username,
     )
     markup = search_list_keyboard(
         events=result.items,
         tokens=tokens,
-        favorite_ids=favorites,
         session_id=session.id,
         page=result.page,
         total_pages=result.total_pages,
@@ -402,6 +401,100 @@ async def move_search(
     return None
 
 
+# ------------------------------------------------------------------ event card
+
+
+async def show_event_detail(
+    bot: Bot,
+    chat_id: int,
+    token: str,
+    *,
+    kind: str,
+    page: int,
+    index: int,
+    session_id: str = "",
+    message: Message | None = None,
+    bot_username: str = "",
+) -> Message | None:
+    payload = await database.get_event_by_token(token)
+    if payload is None:
+        return await _edit_screen(
+            bot,
+            chat_id,
+            message,
+            text="Эта карточка устарела. Откройте список заново.",
+            markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🏠 Домой", callback_data="menu:home"
+                        )
+                    ]
+                ]
+            ),
+        )
+
+    event = event_from_payload(payload)
+    await database.remember_events([event.ref_payload()])
+    is_favorite = await database.is_favorite(chat_id, event.id)
+    marker = EVENT_COLORS[index % len(EVENT_COLORS)]
+    text = format_event_details(event, marker)
+    back_callback = (
+        f"back:s:{session_id}:{page}" if kind == "s" else f"back:f:{page}"
+    )
+    back_text = "⬅️ К списку" if kind == "s" else "⬅️ К избранному"
+    markup = event_detail_keyboard(
+        token=token,
+        source_url=event_click_url(chat_id, event.id, event.source_url),
+        is_favorite=is_favorite,
+        share_url_value=share_url(bot_username, token, event.title),
+        back_callback=back_callback,
+        back_text=back_text,
+    )
+    return await _edit_screen(
+        bot, chat_id, message, text=text, markup=markup
+    )
+
+
+async def back_to_search(
+    bot: Bot,
+    chat_id: int,
+    session_id: str,
+    page: int,
+    message: Message | None,
+    *,
+    bot_username: str = "",
+) -> Message | None:
+    session = search_sessions.get(session_id)
+    if session is None or session.chat_id != chat_id:
+        return await start_search(bot, chat_id, bot_username=bot_username)
+    return await render_search_page(
+        bot,
+        chat_id,
+        session,
+        page=page,
+        message=message,
+        bot_username=bot_username,
+    )
+
+
+async def back_to_favorites(
+    bot: Bot,
+    chat_id: int,
+    page: int,
+    message: Message | None,
+    *,
+    bot_username: str = "",
+) -> Message | None:
+    return await show_favorites(
+        bot,
+        chat_id,
+        page=page,
+        message=message,
+        bot_username=bot_username,
+    )
+
+
 # ------------------------------------------------------------------ favorites
 
 
@@ -481,11 +574,7 @@ async def show_favorites(
     ]
     text = f"<b>⭐ Избранное</b> · {len(favorites)}\n\n"
     text += "\n\n".join(
-        format_favorite(
-            favorite,
-            index=start + index,
-            bot_username=bot_username,
-        )
+        format_favorite(favorite, index=start + index)
         for index, favorite in enumerate(display_favorites, start=1)
     )
     text += "\n\nНапомним за 7, 3 и 1 день до старта."

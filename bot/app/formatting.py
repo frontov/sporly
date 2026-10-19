@@ -161,7 +161,6 @@ def format_event(event: Event, index: int | None = None) -> str:
 def format_favorite(
     favorite: Favorite,
     index: int | None = None,
-    bot_username: str = "",
 ) -> str:
     title = escape(clean_text(favorite.title, 120))
     marker = (
@@ -193,14 +192,6 @@ def format_favorite(
         lines.append(f"📅 {escape(meta)}")
     if favorite.category:
         lines.append(f"🏁 {escape(clean_text(favorite.category, 40))}")
-    if bot_username:
-        share = share_url(
-            bot_username, event_token(favorite.event_id), favorite.title
-        )
-        if share:
-            lines.append(
-                f'<a href="{escape(share, quote=True)}">📤 Поделиться</a>'
-            )
     return "\n".join(lines)
 
 
@@ -213,7 +204,6 @@ def format_event_list(
     filters: str | None = None,
     title: str = "Ближайшие старты",
     page_size: int = 4,
-    bot_username: str = "",
 ) -> str:
     header = f"<b>{title}</b>\n"
     if filters:
@@ -251,15 +241,6 @@ def format_event_list(
             card += f"\n📅 {escape(meta)}"
         if facts_line:
             card += f"\n🏁 {escape(facts_line)}"
-        if bot_username:
-            share = share_url(
-                bot_username, event_token(event.id), event.title
-            )
-            if share:
-                card += (
-                    f'\n<a href="{escape(share, quote=True)}">'
-                    "📤 Поделиться</a>"
-                )
         cards.append(card)
 
     text = header
@@ -269,6 +250,54 @@ def format_event_list(
             break
         text = candidate
     return text
+
+
+def format_event_details(event: Event, marker: str = "") -> str:
+    title = escape(clean_text(event.title, 180))
+    prefix = f"{marker} " if marker else ""
+    lines = [f"<b>{prefix}{title}</b>", ""]
+
+    facts: list[str] = []
+    if event.category:
+        facts.append(clean_text(event.category, 40))
+    if event.distance_summary:
+        facts.append(clean_text(event.distance_summary, 80))
+    if event.surface_type:
+        facts.append(clean_text(event.surface_type, 40))
+    if facts:
+        lines.append("🏁 " + escape(" · ".join(facts)))
+
+    lines.append(f"📅 {escape(event_when(event))}")
+    if event.location:
+        lines.append(f"📍 {escape(clean_text(event.location, 120))}")
+    elif event.venue:
+        lines.append(f"📍 {escape(clean_text(event.venue, 120))}")
+
+    money: list[str] = []
+    if event.price_from:
+        money.append(clean_text(event.price_from, 50))
+    if event.registration_deadline:
+        money.append("регистрация " + clean_text(event.registration_deadline, 60))
+    elif event.registration_status == "open":
+        money.append("регистрация открыта")
+    elif event.registration_status == "closed":
+        money.append("регистрация закрыта")
+    if money:
+        lines.append("💳 " + escape(" · ".join(money)))
+
+    if event.organizer_name:
+        lines.append(f"👤 {escape(clean_text(event.organizer_name, 80))}")
+
+    description = clean_text(event.description, 600)
+    if description and description.casefold() not in title.casefold():
+        lines.append("")
+        lines.append(escape(description))
+
+    if event.source_name:
+        lines.append("")
+        lines.append(f"<i>{escape(clean_text(event.source_name, 50))}</i>")
+
+    return "\n".join(lines)
 
 
 def format_digest_event(event: Event, index: int) -> str:
