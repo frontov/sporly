@@ -13,7 +13,11 @@ from app.flows import (
     show_screen,
     show_subscription,
 )
-from app.keyboards import delete_subscription_keyboard
+from app.keyboards import (
+    BUTTON_HOME,
+    BUTTON_SETUP_INTERESTS,
+    delete_subscription_keyboard,
+)
 
 
 router = Router(name="subscriptions")
@@ -162,11 +166,11 @@ async def delete_subscription(callback: CallbackQuery, bot: Bot) -> None:
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="🎯 Настроить интересы",
+                        text=BUTTON_SETUP_INTERESTS,
                         callback_data="flow:new:onboarding",
                     )
                 ],
-                [InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")],
+                [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
             ]
         ),
     )

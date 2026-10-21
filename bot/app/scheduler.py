@@ -22,6 +22,7 @@ from app.flows import (
     send_event_card,
 )
 from app.formatting import clean_text, filters_summary, format_digest_event
+from app.keyboards import BUTTON_HOME, BUTTON_OPEN
 from app.links import event_click_url
 from app.storage import Favorite
 from app.text import REMINDER_OFFSETS, days_until, local_today, pluralize
@@ -236,7 +237,7 @@ async def send_digests(bot: Bot, bot_username: str = "") -> int:
             if source_url and len(source_url) <= 240:
                 row.append(
                     InlineKeyboardButton(
-                        text="Открыть ↗", url=source_url
+                        text=BUTTON_OPEN, url=source_url
                     )
                 )
             rows.append(row)
@@ -250,7 +251,7 @@ async def send_digests(bot: Bot, bot_username: str = "") -> int:
                 ]
             )
         rows.append(
-            [InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")]
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")]
         )
 
         try:

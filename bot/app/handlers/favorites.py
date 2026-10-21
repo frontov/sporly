@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.context import database
 from app.flows import show_favorites, toggle_favorite_by_token
+from app.keyboards import BUTTON_FAVORITE, BUTTON_FAVORITED
 
 
 router = Router(name="favorites")
@@ -35,7 +36,7 @@ def _toggle_markup(
                     button.text = text
                 else:
                     button.text = (
-                        "В избранном ✅" if active else "В избранное ⭐"
+                        BUTTON_FAVORITED if active else BUTTON_FAVORITE
                     )
                 button.callback_data = (
                     f"unfv:{token}" if active else f"fv:{token}"

@@ -30,6 +30,9 @@ from app.formatting import (
 )
 from app.links import event_click_url, share_url
 from app.keyboards import (
+    BUTTON_FIND,
+    BUTTON_HOME,
+    BUTTON_SETUP_INTERESTS,
     event_detail_keyboard,
     favorites_list_keyboard,
     no_results_keyboard,
@@ -313,9 +316,9 @@ async def render_search_page(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="Повторить", callback_data="menu:find"
+                            text=BUTTON_FIND, callback_data="menu:find"
                         ),
-                        InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home"),
+                        InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
                     ]
                 ]
             ),
@@ -499,7 +502,7 @@ async def show_event_detail(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="🏠 Домой", callback_data="menu:home"
+                            text=BUTTON_HOME, callback_data="menu:home"
                         )
                     ]
                 ]
@@ -596,12 +599,12 @@ async def show_favorites(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="🔍 Найти старты", callback_data="menu:find"
+                            text=BUTTON_FIND, callback_data="menu:find"
                         )
                     ],
                     [
                         InlineKeyboardButton(
-                            text="🏠 Домой", callback_data="menu:home"
+                            text=BUTTON_HOME, callback_data="menu:home"
                         )
                     ],
                 ]
@@ -817,13 +820,13 @@ async def show_subscription(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="🎯 Настроить интересы",
+                            text=BUTTON_SETUP_INTERESTS,
                             callback_data="flow:new:onboarding",
                         )
                     ],
                     [
                         InlineKeyboardButton(
-                            text="🏠 Домой", callback_data="menu:home"
+                            text=BUTTON_HOME, callback_data="menu:home"
                         )
                     ],
                 ]
@@ -893,9 +896,14 @@ async def show_single_event(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="🔍 Найти старты", callback_data="menu:find"
+                            text=BUTTON_FIND, callback_data="menu:find"
                         )
-                    ]
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text=BUTTON_HOME, callback_data="menu:home"
+                        )
+                    ],
                 ]
             ),
         )
@@ -1005,7 +1013,7 @@ async def show_partners_info(
                     url=f"https://t.me/{contact}",
                 )
             ],
-            [InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")],
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
         ]
     )
     return await _edit_screen(

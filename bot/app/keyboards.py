@@ -9,12 +9,24 @@ from app.storage import Subscription
 from app.text import EVENT_COLORS
 
 
+BUTTON_FIND = "🔍 Найти старт"
+BUTTON_SOON = "🔥 Ближайшие"
+BUTTON_INTERESTS = "🎯 Мои интересы"
+BUTTON_FAVORITES = "⭐ Избранное"
+BUTTON_MORE = "⚙️ Ещё"
+BUTTON_HOME = "🏠 Домой"
+BUTTON_SETUP_INTERESTS = "🎯 Настроить интересы"
+BUTTON_OPEN = "🌐 Открыть"
+BUTTON_SHARE = "📤 Поделиться"
+BUTTON_FAVORITE = "⭐ В избранное"
+BUTTON_FAVORITED = "✅ В избранном"
+
 MENU_TEXTS = {
-    "🔍 Найти старт": "menu:find",
-    "🔥 Ближайшие": "menu:soon",
-    "⭐ Избранное": "menu:fav",
-    "🎯 Подписка": "menu:sub",
-    "⚙️ Настройки": "menu:more",
+    BUTTON_FIND: "menu:find",
+    BUTTON_SOON: "menu:soon",
+    BUTTON_FAVORITES: "menu:fav",
+    BUTTON_INTERESTS: "menu:sub",
+    BUTTON_MORE: "menu:more",
 }
 
 # Reply keyboards stay on the client after a bot update. Map old button labels
@@ -66,17 +78,37 @@ def _url_button(text: str, url: str | None) -> InlineKeyboardButton | None:
     return InlineKeyboardButton(text=text, url=url)
 
 
+def _favorite_button(token: str, is_favorite: bool) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text=BUTTON_FAVORITED if is_favorite else BUTTON_FAVORITE,
+        callback_data=f"unfv:{token}" if is_favorite else f"fv:{token}",
+    )
+
+
+def _event_action_row(
+    source_url: str | None, share_url_value: str | None
+) -> list[InlineKeyboardButton]:
+    actions: list[InlineKeyboardButton] = []
+    source = _url_button(BUTTON_OPEN, source_url)
+    if source:
+        actions.append(source)
+    share = _url_button(BUTTON_SHARE, share_url_value)
+    if share:
+        actions.append(share)
+    return actions
+
+
 def home_keyboard(*, is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
             [
-                InlineKeyboardButton(text="🔍 Найти старт", callback_data="menu:find"),
-                InlineKeyboardButton(text="🔥 Ближайшие", callback_data="menu:soon"),
+                InlineKeyboardButton(text=BUTTON_FIND, callback_data="menu:find"),
+                InlineKeyboardButton(text=BUTTON_SOON, callback_data="menu:soon"),
             ],
             [
-                InlineKeyboardButton(text="🎯 Мои интересы", callback_data="menu:sub"),
-                InlineKeyboardButton(text="⭐ Избранное", callback_data="menu:fav"),
+                InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub"),
+                InlineKeyboardButton(text=BUTTON_FAVORITES, callback_data="menu:fav"),
             ],
-            [InlineKeyboardButton(text="⚙️ Ещё", callback_data="menu:more")],
+            [InlineKeyboardButton(text=BUTTON_MORE, callback_data="menu:more")],
         ]
     if is_admin:
         rows.append(
@@ -93,8 +125,8 @@ def search_hub_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📍 Регион", callback_data="flow:city_only"),
             ],
             [
-                InlineKeyboardButton(text="🔥 Ближайшие", callback_data="menu:soon"),
-                InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home"),
+                InlineKeyboardButton(text=BUTTON_SOON, callback_data="menu:soon"),
+                InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
             ],
         ]
     )
@@ -126,15 +158,15 @@ def more_keyboard(
     )
     rows.append(
         [
-            InlineKeyboardButton(text="🎯 Мои интересы", callback_data="menu:sub"),
-            InlineKeyboardButton(text="⭐ Избранное", callback_data="menu:fav"),
+            InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub"),
+            InlineKeyboardButton(text=BUTTON_FAVORITES, callback_data="menu:fav"),
         ]
     )
     if is_admin:
         rows.append(
             [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")]
         )
-    rows.append([InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")])
+    rows.append([InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -162,8 +194,8 @@ def search_list_keyboard(
                 ),
             ]
         )
-    nav.append(InlineKeyboardButton(text="🏠", callback_data="menu:home"))
-    rows.append(nav)
+    if nav:
+        rows.append(nav)
 
     if partner and partner_url:
         button = _url_button(
@@ -172,6 +204,12 @@ def search_list_keyboard(
         if button:
             rows.append([button])
 
+    rows.append(
+        [
+            InlineKeyboardButton(text=BUTTON_FIND, callback_data="menu:find"),
+            InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -196,10 +234,13 @@ def favorites_list_keyboard(
                 ),
             ]
         )
-    nav.append(InlineKeyboardButton(text="🏠", callback_data="menu:home"))
-    rows.append(nav)
+    if nav:
+        rows.append(nav)
     rows.append(
-        [InlineKeyboardButton(text="🔍 Найти", callback_data="menu:find")]
+        [
+            InlineKeyboardButton(text=BUTTON_FIND, callback_data="menu:find"),
+            InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
+        ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -214,30 +255,15 @@ def event_detail_keyboard(
     back_text: str = "⬅️ К списку",
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(
-                text=(
-                    "Убрать из избранного 💔"
-                    if is_favorite
-                    else "В избранное ⭐"
-                ),
-                callback_data=f"unfv:{token}" if is_favorite else f"fv:{token}",
-            )
-        ]
+        [_favorite_button(token, is_favorite)]
     ]
-    actions: list[InlineKeyboardButton] = []
-    share = _url_button("Поделиться 📤", share_url_value)
-    if share:
-        actions.append(share)
-    source = _url_button("Открыть ↗", source_url)
-    if source:
-        actions.append(source)
+    actions = _event_action_row(source_url, share_url_value)
     if actions:
         rows.append(actions)
     rows.append(
         [
             InlineKeyboardButton(text=back_text, callback_data=back_callback),
-            InlineKeyboardButton(text="🏠", callback_data="menu:home"),
+            InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -252,26 +278,11 @@ def single_event_keyboard(
     back_callback: str | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(
-                text=(
-                    "Убрать из избранного 💔"
-                    if is_favorite
-                    else "В избранное ⭐"
-                ),
-                callback_data=f"unfv:{token}" if is_favorite else f"fv:{token}",
-            )
-        ]
+        [_favorite_button(token, is_favorite)]
     ]
-    actions: list[InlineKeyboardButton] = []
-    source = _url_button("Открыть ↗", source_url)
-    if source:
-        actions.append(source)
-    share = _url_button(
-        "Поделиться 📤", share_url(bot_username, token, title)
+    actions = _event_action_row(
+        source_url, share_url(bot_username, token, title)
     )
-    if share:
-        actions.append(share)
     if actions:
         rows.append(actions)
     if back_callback:
@@ -280,12 +291,12 @@ def single_event_keyboard(
                 InlineKeyboardButton(
                     text="⬅️ К списку", callback_data=back_callback
                 ),
-                InlineKeyboardButton(text="🏠", callback_data="menu:home"),
+                InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
             ]
         )
     else:
         rows.append(
-            [InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")]
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")]
         )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -293,10 +304,10 @@ def single_event_keyboard(
 def no_results_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🎛 Изменить фильтры", callback_data="menu:find")],
+            [InlineKeyboardButton(text=BUTTON_FIND, callback_data="menu:find")],
             [
-                InlineKeyboardButton(text="🔥 Ближайшие", callback_data="menu:soon"),
-                InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home"),
+                InlineKeyboardButton(text=BUTTON_SOON, callback_data="menu:soon"),
+                InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
             ],
         ]
     )
@@ -430,7 +441,7 @@ def subscription_keyboard(subscription: Subscription) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=digest, callback_data="sub:toggle_digest")],
             [InlineKeyboardButton(text="✏️ Изменить интересы", callback_data="sub:edit")],
             [InlineKeyboardButton(text="🗑 Удалить интересы", callback_data="sub:delete")],
-            [InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")],
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
         ]
     )
 

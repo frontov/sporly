@@ -17,6 +17,7 @@ from aiogram.types import (
 from app.api_client import api_client
 from app.config import settings
 from app.context import database, partner_registry
+from app.keyboards import BUTTON_HOME
 
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def _stats_keyboard(days: int) -> InlineKeyboardMarkup:
                     text=f"📅 {other} дней", callback_data=f"admin:stats:{other}"
                 ),
             ],
-            [InlineKeyboardButton(text="🏠 Домой", callback_data="menu:home")],
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
         ]
     )
 
@@ -185,7 +186,8 @@ async def _users_text(days: int) -> tuple[str, InlineKeyboardMarkup]:
         [
             InlineKeyboardButton(
                 text="⬅️ Статистика", callback_data=f"admin:stats:{days}"
-            )
+            ),
+            InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
         ]
     )
     body = "\n\n".join(lines)
@@ -314,7 +316,10 @@ async def admin_callbacks(
                         InlineKeyboardButton(
                             text="⬅️ Статистика",
                             callback_data=f"admin:stats:{days}",
-                        )
+                        ),
+                        InlineKeyboardButton(
+                            text=BUTTON_HOME, callback_data="menu:home"
+                        ),
                     ]
                 ]
             ),
@@ -330,7 +335,10 @@ async def admin_callbacks(
                         InlineKeyboardButton(
                             text="⬅️ Статистика",
                             callback_data=f"admin:stats:{days}",
-                        )
+                        ),
+                        InlineKeyboardButton(
+                            text=BUTTON_HOME, callback_data="menu:home"
+                        ),
                     ]
                 ]
             ),
@@ -357,7 +365,10 @@ async def admin_callbacks(
                         InlineKeyboardButton(
                             text="⬅️ Пользователи",
                             callback_data=f"admin:users:{days}",
-                        )
+                        ),
+                        InlineKeyboardButton(
+                            text=BUTTON_HOME, callback_data="menu:home"
+                        ),
                     ]
                 ]
             ),
