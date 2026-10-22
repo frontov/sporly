@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 
 from app.api_client import Event
-from app.formatting import format_event, format_event_card, format_event_list, pick_image
+from app.formatting import (
+    format_event,
+    format_event_card,
+    format_event_details,
+    format_event_list,
+    pick_image,
+)
 from app.storage import Favorite
 
 
@@ -69,6 +75,18 @@ class FormattingTest(unittest.TestCase):
         )
         text = format_event_card(event)
         self.assertLessEqual(len(text), 1024)
+
+    def test_event_details_explain_buttons(self) -> None:
+        event = Event(
+            id="1",
+            title="Старт",
+            starts_at="2027-06-01T00:00:00",
+            source_name="Сайт",
+            source_url="https://example.com",
+        )
+        text = format_event_details(event)
+        self.assertIn("В избранное", text)
+        self.assertIn("Открыть", text)
 
     def test_pick_image_skips_svg(self) -> None:
         event = Event(

@@ -17,6 +17,7 @@ from app.flows import (
     start_search,
 )
 from app.formatting import clean_text, filters_summary
+from app.hints import HINT_MULTISELECT
 from app.keyboards import category_keyboard, city_keyboard
 from app.context import database
 
@@ -95,10 +96,21 @@ def _categories_text(data: dict) -> str:
     summary = filters_summary(data.get("cities") or [], selected)
     intro = ""
     if data.get("mode") == "onboarding":
-        intro = "<b>Настроим подборку</b>\n\n"
+        intro = (
+            "<b>Настроим подборку</b>\n"
+            "Это займёт меньше минуты — потом всё можно изменить.\n\n"
+        )
+    skip_hint = (
+        "Если вид спорта не важен — «Пропустить»."
+        if data.get("mode") == "onboarding"
+        else "Чтобы выйти без поиска — «Отмена»."
+    )
     return (
         f"{intro}<b>Шаг 1 из 2 · Вид спорта</b>\n\n"
-        "Можно выбрать несколько вариантов.\n"
+        "Нажмите на вид спорта, чтобы выбрать его.\n"
+        f"{HINT_MULTISELECT}\n\n"
+        "Когда закончите — «Далее →».\n"
+        f"{skip_hint}\n\n"
         f"Выбрано: {summary}"
     )
 
@@ -108,8 +120,10 @@ def _cities_text(data: dict) -> str:
     summary = "📍 " + escape(", ".join(selected)) if selected else "📍 Вся Россия"
     return (
         "<b>Шаг 2 из 2 · Регион</b>\n\n"
-        "Выберите один или несколько регионов. Если ничего не выбрать — "
-        "будет вся Россия.\n"
+        "Нажмите на регион, чтобы выбрать его. Можно выбрать до 5.\n"
+        "Нет вашего города? Нажмите «✍️ Другой город» и напишите его.\n"
+        "Не хотите ограничивать — «🌍 Вся Россия».\n\n"
+        "Когда закончите — «✅ Подтвердить».\n\n"
         f"Выбрано регионов: <b>{len(selected)}</b>\n"
         f"Сейчас: {summary}"
     )
@@ -318,7 +332,9 @@ async def city_action(
         await _edit(
             callback,
             "<b>Напишите регион или город</b>\n\n"
-            "Например: Казань, Сочи, Свердловская область.",
+            "Например: Казань, Сочи, Свердловская область.\n"
+            "Бот добавит его в список выбранных.\n\n"
+            "💡 Если передумали — нажмите «Отмена».",
             InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="Отмена", callback_data="flow:cancel")]
@@ -404,8 +420,13 @@ async def city_text(
         await message.answer("Ок, вернулся в меню.")
         return
 
-    from app.handlers.common import send_find_hub, send_more
-    from app.flows import show_favorites, show_subscription, start_search
+    from app.handlers.common import send_find_hub, send_help, send_more
+    from app.flows import (
+        show_favorites,
+        show_notifications,
+        show_subscription,
+        start_search,
+    )
     from app.keyboards import menu_callback_for_text
 
     data = await _state_data(state)
@@ -427,13 +448,20 @@ async def city_text(
             await show_favorites(bot, message.from_user.id, bot_username=bot_username)
         elif action == "sub":
             await show_subscription(bot, message.from_user.id, bot_username=bot_username)
+        elif action == "notify":
+            await show_notifications(bot, message.from_user.id)
         elif action == "more":
             await send_more(bot, message.from_user.id, bot_username=bot_username)
+        elif action == "help":
+            await send_help(bot, message.from_user.id)
         return
 
     value = clean_text(text, 80)
     if not value:
-        await message.answer("Напишите название региона текстом.")
+        await message.answer(
+            "Напишите название региона текстом — например, «Казань» или "
+            "«Сочи».\n💡 «Отмена» ниже вернёт в меню."
+        )
         return
 
     data = await _state_data(state)
@@ -441,7 +469,10 @@ async def city_text(
     selected = list(data["cities"])
     if value.casefold() not in {item.casefold() for item in selected}:
         if len(selected) >= 5:
-            await message.answer("Можно выбрать до 5 регионов.")
+            await message.answer(
+                "Можно выбрать до 5 регионов. Уберите один из выбранных "
+                "или нажмите «✅ Подтвердить»."
+            )
             return
         selected.append(value)
     await state.update_data(cities=selected, city_page=0)

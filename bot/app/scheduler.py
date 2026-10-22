@@ -19,17 +19,80 @@ from app.flows import (
     _event_tokens,
     _favorite_ids,
     _find_partner,
-    send_event_card,
 )
-from app.formatting import clean_text, filters_summary, format_digest_event
-from app.keyboards import BUTTON_HOME, BUTTON_OPEN
+from app.formatting import (
+    clean_text,
+    filters_summary,
+    format_digest_event,
+    format_favorite,
+)
+from app.keyboards import BUTTON_HOME, BUTTON_INTERESTS, BUTTON_OPEN
 from app.links import event_click_url
-from app.storage import Favorite
-from app.text import REMINDER_OFFSETS, days_until, local_today, pluralize
+from app.storage import Favorite, Subscription
+from app.text import (
+    MOSCOW_TZ,
+    REMINDER_OFFSETS,
+    days_until,
+    local_today,
+)
 
 
 logger = logging.getLogger(__name__)
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+
+
+def _quiet_hour(hour: int) -> bool:
+    """Whether a local Moscow hour is inside the configured quiet window."""
+
+    start = settings.quiet_hours_start % 24
+    end = settings.quiet_hours_end % 24
+    if start == end:
+        return False
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
+
+
+def is_quiet_hours(now: datetime | None = None) -> bool:
+    if now is None:
+        now = datetime.now(MOSCOW_TZ)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=MOSCOW_TZ)
+    else:
+        now = now.astimezone(MOSCOW_TZ)
+    return _quiet_hour(now.hour)
+
+
+def seconds_until_quiet_end(now: datetime | None = None) -> int:
+    """Seconds to sleep before the next daytime delivery window opens."""
+
+    if now is None:
+        now = datetime.now(MOSCOW_TZ)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=MOSCOW_TZ)
+    else:
+        now = now.astimezone(MOSCOW_TZ)
+    if not _quiet_hour(now.hour):
+        return 0
+    target = now.replace(
+        hour=settings.quiet_hours_end % 24,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if target <= now:
+        target += timedelta(days=1)
+    return max(int((target - now).total_seconds()), 60)
+
+
+def _effective_digest_hour_utc() -> int:
+    """Move the digest out of quiet hours if it was configured at night."""
+
+    local_hour = (settings.digest_hour_utc + 3) % 24
+    if _quiet_hour(local_hour):
+        return (settings.quiet_hours_end - 3) % 24
+    return settings.digest_hour_utc % 24
+
 
 def _today() -> str:
     return local_today().isoformat()
@@ -59,7 +122,76 @@ def is_new_since(first_seen_at: str | None, cutoff: str | None) -> bool:
     return first_seen_dt >= cutoff_dt
 
 
+async def _send_new_events_batch(
+    bot: Bot,
+    subscription: Subscription,
+    events: list[Event],
+) -> None:
+    """Send all fresh events for one user as a single daily message."""
+
+    chat_id = subscription.chat_id
+    tracked_urls = {
+        event.id: event_click_url(chat_id, event.id, event.source_url)
+        for event in events
+    }
+    display_events = [
+        event.model_copy(update={"source_url": tracked_urls.get(event.id)})
+        for event in events
+    ]
+    text = (
+        "<b>🆕 Новые старты по вашим интересам</b>\n"
+        f"{filters_summary(subscription.cities, subscription.categories)}\n\n"
+        "💡 ⭐ с номером — сохранить в избранное, «🌐 Открыть» — сайт "
+        "организатора.\n\n"
+        + "\n\n".join(
+            format_digest_event(event, index)
+            for index, event in enumerate(display_events, start=1)
+        )
+    )
+
+    tokens = await _event_tokens(events)
+    favorites = await _favorite_ids(chat_id)
+    rows: list[list[InlineKeyboardButton]] = []
+    for index, event in enumerate(events, start=1):
+        token = tokens[event.id]
+        is_favorite = event.id in favorites
+        row = [
+            InlineKeyboardButton(
+                text=f"{'✅' if is_favorite else '⭐'} {index}",
+                callback_data=f"unfv:{token}" if is_favorite else f"fv:{token}",
+            )
+        ]
+        source_url = tracked_urls.get(event.id)
+        if source_url and len(source_url) <= 240:
+            row.append(InlineKeyboardButton(text=BUTTON_OPEN, url=source_url))
+        rows.append(row)
+
+    rows.append(
+        [InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub")]
+    )
+    rows.append(
+        [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")]
+    )
+
+    await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        link_preview_options=NO_PREVIEW,
+    )
+    for event in events:
+        await database.mark_seen(chat_id, [event.id])
+        await database.log_event(chat_id, "notification_sent", event.id)
+    await database.log_event(
+        chat_id, "new_events_digest_sent", str(len(events))
+    )
+
+
 async def check_new_events(bot: Bot, bot_username: str = "") -> int:
+    # Proactive messages are daytime-only.
+    if is_quiet_hours():
+        return 0
+
     subscriptions = await database.active_subscriptions()
 
     # Users often share the same filters. Group them so the catalog is queried
@@ -101,12 +233,13 @@ async def check_new_events(bot: Bot, bot_username: str = "") -> int:
             continue
 
         for subscription in subscribers:
-            if settings.max_notifications_per_day > 0:
-                sent_today = await database.interactions_today(
-                    subscription.chat_id, "notification_sent"
-                )
-                if sent_today >= settings.max_notifications_per_day:
-                    continue
+            # At most one new-events message per user per day.
+            already_sent = await database.interactions_today(
+                subscription.chat_id, "new_events_digest_sent"
+            )
+            if already_sent:
+                continue
+
             seen = await database.seen_ids(subscription.chat_id)
             cutoff = subscription.updated_at or subscription.created_at
             fresh = [
@@ -122,28 +255,22 @@ async def check_new_events(bot: Bot, bot_username: str = "") -> int:
             if not fresh:
                 continue
 
-            for event in fresh[: settings.max_notifications_per_tick]:
-                try:
-                    await send_event_card(
-                        bot,
-                        subscription.chat_id,
-                        event,
-                        bot_username=bot_username,
-                        prefix="🆕 <b>Новый старт по вашей подписке</b>",
-                    )
-                    await database.mark_seen(subscription.chat_id, [event.id])
-                    await database.log_event(
-                        subscription.chat_id, "notification_sent", event.id
-                    )
-                    sent_total += 1
-                except Exception as error:
-                    logger.warning(
-                        "Cannot send event %s to %s: %s",
-                        event.id,
-                        subscription.chat_id,
-                        error,
-                    )
-                await asyncio.sleep(0.05)
+            limit = max(1, min(settings.max_notifications_per_tick, 8))
+            batch = fresh[:limit]
+            try:
+                await _send_new_events_batch(
+                    bot,
+                    subscription,
+                    batch,
+                )
+                sent_total += 1
+            except Exception as error:
+                logger.warning(
+                    "Cannot send new events batch to %s: %s",
+                    subscription.chat_id,
+                    error,
+                )
+            await asyncio.sleep(0.05)
 
     return sent_total
 
@@ -151,7 +278,7 @@ async def check_new_events(bot: Bot, bot_username: str = "") -> int:
 def _next_digest_time(now: datetime | None = None) -> datetime:
     now = now or datetime.now(timezone.utc)
     target = now.replace(
-        hour=max(0, min(settings.digest_hour_utc, 23)),
+        hour=max(0, min(_effective_digest_hour_utc(), 23)),
         minute=0,
         second=0,
         microsecond=0,
@@ -162,6 +289,9 @@ def _next_digest_time(now: datetime | None = None) -> datetime:
 
 
 async def send_digests(bot: Bot, bot_username: str = "") -> int:
+    if is_quiet_hours():
+        return 0
+
     subscriptions = await database.active_subscriptions()
     day = _today()
     sent = 0
@@ -205,7 +335,10 @@ async def send_digests(bot: Bot, bot_username: str = "") -> int:
         )
         text = (
             "<b>📬 Дайджест Sporly</b>\n"
-            f"{filters_summary(subscription.cities, subscription.categories)}\n\n"
+            f"{filters_summary(subscription.cities, subscription.categories)}\n"
+            + "\n💡 ⭐ с номером — сохранить старт, «🌐 Открыть» — сайт "
+            "организатора.\n"
+            "\n"
             + "\n\n".join(
                 format_digest_event(event, index)
                 for index, event in enumerate(display_events, start=1)
@@ -222,12 +355,12 @@ async def send_digests(bot: Bot, bot_username: str = "") -> int:
         tokens = await _event_tokens(events)
         favorites = await _favorite_ids(subscription.chat_id)
         rows: list[list[InlineKeyboardButton]] = []
-        for event in events:
+        for index, event in enumerate(events, start=1):
             token = tokens[event.id]
             is_favorite = event.id in favorites
             row = [
                 InlineKeyboardButton(
-                    text="✅" if is_favorite else "⭐",
+                    text=f"{'✅' if is_favorite else '⭐'} {index}",
                     callback_data=(
                         f"unfv:{token}" if is_favorite else f"fv:{token}"
                     ),
@@ -250,6 +383,13 @@ async def send_digests(bot: Bot, bot_username: str = "") -> int:
                     )
                 ]
             )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=BUTTON_INTERESTS, callback_data="menu:sub"
+                )
+            ]
+        )
         rows.append(
             [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")]
         )
@@ -301,55 +441,95 @@ def reminder_offset(days: int, sent_offsets: set[str]) -> int | None:
     return None
 
 
-def _reminder_prefix(days: int | None) -> str:
-    if days is None:
-        return "⏰ <b>Напоминание о старте</b>"
-    if days <= 0:
-        return "⏰ <b>Старт сегодня</b>"
-    if days == 1:
-        return "⏰ <b>Старт завтра</b>"
-    return (
-        f"⏰ <b>Старт через {days} "
-        f"{pluralize(days, 'день', 'дня', 'дней')}</b>"
-    )
-
-
 async def send_reminders(bot: Bot, bot_username: str = "") -> int:
+    # Reminders are never sent at night.
+    if is_quiet_hours():
+        return 0
+
     favorites = await database.all_favorites()
-    sent = 0
+    reminders_cache: dict[int, bool] = {}
+    due_by_chat: dict[int, list[Favorite]] = {}
+
     for favorite in favorites:
+        if favorite.chat_id not in reminders_cache:
+            reminders_cache[favorite.chat_id] = await database.reminders_enabled(
+                favorite.chat_id
+            )
+        if not reminders_cache[favorite.chat_id]:
+            continue
         days = days_until(favorite.starts_at)
         if days is None or days < 0:
             continue
-        sent_offsets = set(favorite.reminded_offsets)
-        threshold = reminder_offset(days, sent_offsets)
-        if threshold is None:
+        if reminder_offset(days, set(favorite.reminded_offsets)) is None:
+            continue
+        due_by_chat.setdefault(favorite.chat_id, []).append(favorite)
+
+    sent = 0
+    for chat_id, due in due_by_chat.items():
+        # One reminder message per user per day, even with several favorites.
+        if await database.interactions_today(chat_id, "reminders_digest_sent"):
             continue
 
-        event = _favorite_to_event(favorite)
-        try:
-            await send_event_card(
-                bot,
-                favorite.chat_id,
-                event,
-                bot_username=bot_username,
-                prefix=_reminder_prefix(days),
+        events = [_favorite_to_event(favorite) for favorite in due]
+        tokens = await _event_tokens(events)
+        rows: list[list[InlineKeyboardButton]] = []
+        text_parts: list[str] = ["<b>⏰ Напоминания об избранном</b>"]
+        for index, favorite in enumerate(due, start=1):
+            text_parts.append(
+                format_favorite(
+                    favorite,
+                    index=index,
+                    bot_username=bot_username,
+                    page=1,
+                )
             )
-            for offset in REMINDER_OFFSETS:
-                if offset >= days:
-                    await database.mark_reminded(
-                        favorite.chat_id, favorite.event_id, str(offset)
-                    )
+            token = tokens[favorite.event_id]
+            row = [
+                InlineKeyboardButton(
+                    text=f"✅ {index}", callback_data=f"unfv:{token}"
+                )
+            ]
+            source_url = event_click_url(
+                chat_id, favorite.event_id, favorite.source_url
+            )
+            if source_url and len(source_url) <= 240:
+                row.append(InlineKeyboardButton(text=BUTTON_OPEN, url=source_url))
+            rows.append(row)
+
+        text_parts.append(
+            "💡 «Подробнее →» откроет карточку, ✅ — убрать из избранного."
+        )
+        rows.append(
+            [InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub")]
+        )
+        rows.append(
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")]
+        )
+
+        try:
+            await bot.send_message(
+                chat_id,
+                "\n\n".join(text_parts),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+                link_preview_options=NO_PREVIEW,
+            )
+            for favorite in due:
+                days = days_until(favorite.starts_at) or 0
+                for offset in REMINDER_OFFSETS:
+                    if offset >= days:
+                        await database.mark_reminded(
+                            chat_id, favorite.event_id, str(offset)
+                        )
+                await database.log_event(
+                    chat_id, "reminder_sent", favorite.event_id
+                )
             await database.log_event(
-                favorite.chat_id, "reminder_sent", favorite.event_id
+                chat_id, "reminders_digest_sent", str(len(due))
             )
             sent += 1
         except Exception as error:
             logger.warning(
-                "Cannot send reminder for %s to %s: %s",
-                favorite.event_id,
-                favorite.chat_id,
-                error,
+                "Cannot send reminders to %s: %s", chat_id, error
             )
         await asyncio.sleep(0.05)
     return sent
@@ -358,10 +538,13 @@ async def send_reminders(bot: Bot, bot_username: str = "") -> int:
 async def notification_loop(bot: Bot, bot_username: str = "") -> None:
     await asyncio.sleep(5)
     while True:
+        if is_quiet_hours():
+            await asyncio.sleep(seconds_until_quiet_end())
+            continue
         try:
             sent = await check_new_events(bot, bot_username)
             if sent:
-                logger.info("Sent %s event notifications", sent)
+                logger.info("Sent %s new-events digests", sent)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -388,6 +571,9 @@ async def digest_loop(bot: Bot, bot_username: str = "") -> None:
 async def reminder_loop(bot: Bot, bot_username: str = "") -> None:
     await asyncio.sleep(10)
     while True:
+        if is_quiet_hours():
+            await asyncio.sleep(seconds_until_quiet_end())
+            continue
         try:
             sent = await send_reminders(bot, bot_username)
             if sent:

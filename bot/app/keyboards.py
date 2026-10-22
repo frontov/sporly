@@ -15,7 +15,11 @@ BUTTON_INTERESTS = "🎯 Мои интересы"
 BUTTON_FAVORITES = "⭐ Избранное"
 BUTTON_MORE = "⚙️ Ещё"
 BUTTON_HOME = "🏠 Домой"
+BUTTON_HELP = "❓ Как пользоваться"
+BUTTON_NOTIFICATIONS = "🔔 Уведомления"
 BUTTON_SETUP_INTERESTS = "🎯 Настроить интересы"
+BUTTON_ALL = "🌍 Все старты"
+BUTTON_SHOW_SOON = "🔥 Смотреть ближайшие"
 BUTTON_OPEN = "🌐 Открыть"
 BUTTON_SHARE = "📤 Поделиться"
 BUTTON_FAVORITE = "⭐ В избранное"
@@ -50,10 +54,16 @@ LEGACY_MENU_ALIASES = {
     "мои события": "menu:sub",
     "мои интересы": "menu:sub",
     "интересы": "menu:sub",
-    "уведомления": "menu:sub",
+    "уведомления": "menu:notify",
+    "настройки уведомлений": "menu:notify",
     "настройки": "menu:more",
     "еще": "menu:more",
     "ещё": "menu:more",
+    "помощь": "menu:help",
+    "справка": "menu:help",
+    "как пользоваться": "menu:help",
+    "как пользоваться ботом": "menu:help",
+    "help": "menu:help",
 }
 
 
@@ -109,12 +119,54 @@ def home_keyboard(*, is_admin: bool = False) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text=BUTTON_FAVORITES, callback_data="menu:fav"),
             ],
             [InlineKeyboardButton(text=BUTTON_MORE, callback_data="menu:more")],
+            [InlineKeyboardButton(text=BUTTON_HELP, callback_data="menu:help")],
         ]
     if is_admin:
         rows.append(
             [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")]
         )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def help_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=BUTTON_FIND, callback_data="menu:find"),
+                InlineKeyboardButton(text=BUTTON_SOON, callback_data="menu:soon"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=BUTTON_INTERESTS, callback_data="menu:sub"
+                ),
+                InlineKeyboardButton(
+                    text=BUTTON_FAVORITES, callback_data="menu:fav"
+                ),
+            ],
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
+        ]
+    )
+
+
+def interests_saved_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=BUTTON_SHOW_SOON, callback_data="menu:soon"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=BUTTON_INTERESTS, callback_data="menu:sub"
+                ),
+                InlineKeyboardButton(
+                    text=BUTTON_FIND, callback_data="menu:find"
+                ),
+            ],
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
+        ]
+    )
 
 
 def search_hub_keyboard() -> InlineKeyboardMarkup:
@@ -162,10 +214,20 @@ def more_keyboard(
             InlineKeyboardButton(text=BUTTON_FAVORITES, callback_data="menu:fav"),
         ]
     )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=BUTTON_NOTIFICATIONS, callback_data="menu:notify"
+            )
+        ]
+    )
     if is_admin:
         rows.append(
             [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")]
         )
+    rows.append(
+        [InlineKeyboardButton(text=BUTTON_HELP, callback_data="menu:help")]
+    )
     rows.append([InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -304,11 +366,15 @@ def single_event_keyboard(
 def no_results_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=BUTTON_FIND, callback_data="menu:find")],
+            [
+                InlineKeyboardButton(text=BUTTON_FIND, callback_data="menu:find"),
+                InlineKeyboardButton(text=BUTTON_ALL, callback_data="menu:all"),
+            ],
             [
                 InlineKeyboardButton(text=BUTTON_SOON, callback_data="menu:soon"),
-                InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
+                InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub"),
             ],
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
         ]
     )
 
@@ -432,18 +498,109 @@ def city_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def subscription_keyboard(subscription: Subscription) -> InlineKeyboardMarkup:
-    notify = "🔔 Уведомления: вкл" if subscription.notify_enabled else "🔕 Уведомления: выкл"
-    digest = "📬 Дайджест: вкл" if subscription.digest_enabled else "📭 Дайджест: выкл"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=notify, callback_data="sub:toggle_notify")],
-            [InlineKeyboardButton(text=digest, callback_data="sub:toggle_digest")],
-            [InlineKeyboardButton(text="✏️ Изменить интересы", callback_data="sub:edit")],
-            [InlineKeyboardButton(text="🗑 Удалить интересы", callback_data="sub:delete")],
+def _notification_toggle_rows(
+    *,
+    notify_enabled: bool,
+    digest_enabled: bool,
+    reminders_enabled: bool,
+) -> list[list[InlineKeyboardButton]]:
+    notify = (
+        "🔔 Новые старты по фильтрам: вкл"
+        if notify_enabled
+        else "🔕 Новые старты по фильтрам: выкл"
+    )
+    digest = "📬 Дайджест: вкл" if digest_enabled else "📭 Дайджест: выкл"
+    reminders = (
+        "⏰ Напоминания об избранном: вкл"
+        if reminders_enabled
+        else "🔕 Напоминания об избранном: выкл"
+    )
+    return [
+        [InlineKeyboardButton(text=notify, callback_data="sub:toggle_notify")],
+        [InlineKeyboardButton(text=digest, callback_data="sub:toggle_digest")],
+        [InlineKeyboardButton(text=reminders, callback_data="sub:toggle_reminders")],
+    ]
+
+
+def notification_settings_keyboard(
+    *,
+    has_subscription: bool,
+    notify_enabled: bool = True,
+    digest_enabled: bool = False,
+    reminders_enabled: bool = True,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_subscription:
+        rows.extend(
+            _notification_toggle_rows(
+                notify_enabled=notify_enabled,
+                digest_enabled=digest_enabled,
+                reminders_enabled=reminders_enabled,
+            )
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=BUTTON_INTERESTS, callback_data="menu:sub"
+                )
+            ]
+        )
+    else:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=BUTTON_SETUP_INTERESTS,
+                    callback_data="flow:new:onboarding",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=(
+                        "⏰ Напоминания об избранном: вкл"
+                        if reminders_enabled
+                        else "🔕 Напоминания об избранном: выкл"
+                    ),
+                    callback_data="sub:toggle_reminders",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def subscription_keyboard(
+    subscription: Subscription, *, reminders_enabled: bool = True
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text=BUTTON_SHOW_SOON, callback_data="menu:soon")]
+    ]
+    rows.extend(
+        _notification_toggle_rows(
+            notify_enabled=subscription.notify_enabled,
+            digest_enabled=subscription.digest_enabled,
+            reminders_enabled=reminders_enabled,
+        )
+    )
+    rows.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    text="✏️ Изменить интересы", callback_data="sub:edit"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🗑 Удалить интересы", callback_data="sub:delete"
+                )
+            ],
             [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def delete_subscription_keyboard() -> InlineKeyboardMarkup:

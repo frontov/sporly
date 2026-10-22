@@ -40,6 +40,7 @@ PUBLIC_COMMANDS = [
     BotCommand(command="find", description="Найти старт"),
     BotCommand(command="soon", description="Ближайшие старты"),
     BotCommand(command="subscribe", description="Мои интересы"),
+    BotCommand(command="notifications", description="Настройки уведомлений"),
     BotCommand(command="survey", description="Настроить интересы заново"),
     BotCommand(command="favorites", description="Избранное и напоминания"),
     BotCommand(command="settings", description="Настройки"),

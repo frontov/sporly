@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     digest_hour_utc: int = 6
     reminder_check_interval_seconds: int = 3600
     max_notifications_per_tick: int = 4
-    max_notifications_per_day: int = 8
+    # Quiet hours are in Moscow time. Outside this window the bot sends
+    # nothing proactively: no new-event digests and no reminders.
+    quiet_hours_start: int = 22
+    quiet_hours_end: int = 9
     drop_pending_updates: bool = False
 
     # Growth / monetization

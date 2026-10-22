@@ -37,6 +37,7 @@ class User:
     survey_completed: bool
     created_at: str
     last_active_at: str
+    reminders_enabled: bool = True
 
 
 @dataclass(slots=True)
@@ -45,7 +46,7 @@ class Subscription:
     cities: list[str] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
     notify_enabled: bool = True
-    digest_enabled: bool = True
+    digest_enabled: bool = False
     last_digest_day: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -206,6 +207,7 @@ class Database:
                     onboarded INTEGER NOT NULL DEFAULT 0,
                     ui_version INTEGER NOT NULL DEFAULT 0,
                     survey_completed INTEGER NOT NULL DEFAULT 0,
+                    reminders_enabled INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     last_active_at TEXT NOT NULL
                 );
@@ -215,7 +217,7 @@ class Database:
                     cities TEXT NOT NULL DEFAULT '[]',
                     categories TEXT NOT NULL DEFAULT '[]',
                     notify_enabled INTEGER NOT NULL DEFAULT 1,
-                    digest_enabled INTEGER NOT NULL DEFAULT 1,
+                    digest_enabled INTEGER NOT NULL DEFAULT 0,
                     last_digest_day TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -303,6 +305,10 @@ class Database:
             if "survey_completed" not in user_columns:
                 connection.execute(
                     "ALTER TABLE users ADD COLUMN survey_completed INTEGER NOT NULL DEFAULT 0"
+                )
+            if "reminders_enabled" not in user_columns:
+                connection.execute(
+                    "ALTER TABLE users ADD COLUMN reminders_enabled INTEGER NOT NULL DEFAULT 1"
                 )
             self._migrate_legacy_json(connection)
 
@@ -474,6 +480,7 @@ class Database:
             survey_completed=bool(row["survey_completed"]),
             created_at=row["created_at"],
             last_active_at=row["last_active_at"],
+            reminders_enabled=bool(row["reminders_enabled"]),
         )
 
     async def get_user(self, chat_id: int) -> User | None:
@@ -583,6 +590,36 @@ class Database:
             )
             connection.commit()
 
+    async def reminders_enabled(self, chat_id: int) -> bool:
+        return await asyncio.to_thread(self._reminders_enabled_sync, chat_id)
+
+    def _reminders_enabled_sync(self, chat_id: int) -> bool:
+        with self._db() as connection:
+            row = connection.execute(
+                "SELECT reminders_enabled FROM users WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+        return True if row is None else bool(row["reminders_enabled"])
+
+    async def toggle_reminders(self, chat_id: int) -> bool | None:
+        return await asyncio.to_thread(self._toggle_reminders_sync, chat_id)
+
+    def _toggle_reminders_sync(self, chat_id: int) -> bool | None:
+        with self._db() as connection:
+            row = connection.execute(
+                "SELECT reminders_enabled FROM users WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            new_value = 0 if row["reminders_enabled"] else 1
+            connection.execute(
+                "UPDATE users SET reminders_enabled = ? WHERE chat_id = ?",
+                (new_value, chat_id),
+            )
+            connection.commit()
+        return bool(new_value)
+
     # ---------------------------------------------------------- subscriptions
 
     async def get_subscription(self, chat_id: int) -> Subscription | None:
@@ -613,7 +650,7 @@ class Database:
         cities: list[str],
         categories: list[str],
         notify_enabled: bool = True,
-        digest_enabled: bool = True,
+        digest_enabled: bool = False,
     ) -> Subscription:
         return await asyncio.to_thread(
             self._save_subscription_sync,

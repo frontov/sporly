@@ -5,6 +5,7 @@ import re
 from urllib.parse import urlparse
 
 from app.api_client import Event
+from app.hints import HINT_FAVORITE, HINT_OPEN_SITE, HINT_TAP_DETAIL
 from app.storage import Favorite
 from app.links import event_token, share_url
 from app.text import EVENT_COLORS, countdown, format_date, pluralize
@@ -217,6 +218,8 @@ def format_event_list(
         f"Найдено {total} {pluralize(total, 'старт', 'старта', 'стартов')}"
         f" · стр. {page}/{max(total_pages, 1)}"
     )
+    if bot_username:
+        header += f"\n{HINT_TAP_DETAIL}"
 
     cards: list[str] = []
     for position, event in enumerate(events, start=1):
@@ -306,6 +309,10 @@ def format_event_details(event: Event, marker: str = "") -> str:
     if event.source_name:
         lines.append("")
         lines.append(f"<i>{escape(clean_text(event.source_name, 50))}</i>")
+
+    lines.append("")
+    lines.append(HINT_FAVORITE)
+    lines.append(HINT_OPEN_SITE)
 
     return "\n".join(lines)
 

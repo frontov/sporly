@@ -75,7 +75,11 @@ async def add_favorite(
     if not changed:
         await callback.answer("Ссылка устарела, откройте старт заново", show_alert=True)
         return
-    await callback.answer("Уже в избранном" if already else "⭐ Добавлено в избранное")
+    await callback.answer(
+        "Уже в избранном"
+        if already
+        else "⭐ Добавлено. Напомним за 7, 3 и 1 день."
+    )
     if callback.message is not None:
         markup = _toggle_markup(callback.message.reply_markup, token, active=True)
         if markup:

@@ -22,6 +22,7 @@ from app.context import database
 from app.flows import (
     delete_current_screen,
     show_favorites,
+    show_notifications,
     show_partners_info,
     show_single_event,
     show_subscription,
@@ -31,7 +32,14 @@ from app.flows import (
 )
 from app.formatting import clean_text
 from app.filter_wizard import send_onboarding
+from app.hints import (
+    HINT_FAVORITE,
+    HINT_FIND_EXAMPLES,
+    HINT_HELP,
+    HINT_TAP_DETAIL,
+)
 from app.keyboards import (
+    help_keyboard,
     home_keyboard,
     menu_callback_for_text,
     more_keyboard,
@@ -47,35 +55,72 @@ HERO_PATH = Path(__file__).resolve().parent.parent / "assets" / "hero.png"
 _HERO_FILE_ID: str | None = None
 
 HOME_TEXT = (
-    "<b>Sporly</b>\n"
-    "Спортивные старты в одном месте.\n\n"
-    "Найдите свой следующий старт — или подпишитесь на новые."
+    "<b>Sporly</b> — спортивные старты в одном месте.\n\n"
+    "<b>Куда нажать</b>\n"
+    "🔍 <b>Найти старт</b> — поиск по названию, городу или виду спорта\n"
+    "🔥 <b>Ближайшие</b> — старты по вашим интересам\n"
+    "🎯 <b>Мои интересы</b> — виды спорта, регионы и уведомления\n"
+    "⭐ <b>Избранное</b> — сохранённые старты и напоминания\n"
+    "⚙️ <b>Ещё</b> — уведомления, приглашения, реклама и сайт\n\n"
+    f"{HINT_FIND_EXAMPLES} Просто напишите запрос — искать по кнопкам "
+    "не обязательно.\n"
+    f"{HINT_HELP}"
 )
 
 FIND_HUB = (
     "<b>🔍 Что ищем?</b>\n\n"
-    "Напишите запрос сообщением или выберите фильтры."
+    "Напишите запрос сообщением — например, «полумарафон», «лыжи» или "
+    "«Казань».\n\n"
+    "<b>Или выберите фильтры:</b>\n"
+    "🏃 <b>Вид спорта</b> — можно выбрать несколько\n"
+    "📍 <b>Регион</b> — город или область\n\n"
+    f"{HINT_TAP_DETAIL}\n"
+    f"{HINT_HELP}"
 )
 
 MORE_TEXT = (
     "<b>⚙️ Ещё</b>\n\n"
-    "Приглашения, реклама и полный каталог на сайте."
+    "🎁 <b>Пригласить друга</b> — ваша личная ссылка.\n"
+    "🤝 <b>Реклама</b> — размещение для организаторов стартов.\n"
+    "🌐 <b>Сайт</b> — полный каталог с календарём и фильтрами.\n\n"
+    "🔔 <b>Уведомления</b> — отдельно настройте новые старты по фильтрам,\n"
+    "дайджест и напоминания об избранном.\n\n"
+    "🎯 <b>Мои интересы</b> и ⭐ <b>Избранное</b> — всегда под рукой\n"
+    "в этом меню.\n\n"
+    f"{HINT_HELP}"
 )
 
 HELP_TEXT = (
-    "<b>Sporly</b>\n\n"
-    "🔍 Напишите запрос или выберите фильтры — покажем старты по одному, "
-    "как карточки.\n"
-    "⭐ Сохраняйте события в избранное — напомним за 7, 3 и 1 день.\n"
-    "🎯 «Мои интересы» — виды спорта и регионы. «Ближайшие» показывает\n"
-    "только старты из этой подборки.\n\n"
-    "Команды:\n"
+    "<b>Как пользоваться Sporly</b>\n\n"
+    "<b>1. Найдите старт</b>\n"
+    "Нажмите «🔍 Найти старт» или просто напишите боту запрос: название,\n"
+    "город или вид спорта. Можно задать фильтры: 🏃 вид спорта и 📍 регион.\n\n"
+    "<b>2. Откройте карточку</b>\n"
+    "В списке нажмите «Подробнее →» под стартом. Там дата, место, цена,\n"
+    "регистрация и кнопки действий.\n\n"
+    "<b>3. Сохраните или поделитесь</b>\n"
+    "⭐ «В избранное» — бот напомнит за 7, 3 и 1 день и в день старта.\n"
+    "🌐 «Открыть» — сайт организатора и регистрация.\n"
+    "📤 «Поделиться» — ссылка на карточку для друзей.\n\n"
+    "<b>4. Подпишитесь на новые</b>\n"
+    "«🎯 Мои интересы» — выберите виды спорта и регионы. «🔥 Ближайшие»\n"
+    "показывает только их, а бот присылает новые старты и ежедневный дайджест.\n\n"
+    "<b>5. Настройте уведомления</b>\n"
+    "«⚙️ Ещё» → «🔔 Уведомления» — три независимые настройки:\n"
+    "🔔 новые старты по сохранённым фильтрам — раз в день;\n"
+    "📬 дайджест ближайших стартов — раз в день утром;\n"
+    "⏰ напоминания об избранном за 7, 3 и 1 день и в день старта.\n"
+    "Ночью уведомления не приходят. Можно включить любую комбинацию.\n\n"
+    "<b>Команды</b>\n"
     "/find — поиск\n"
     "/soon — ближайшие\n"
     "/subscribe — мои интересы\n"
+    "/notifications — настройки уведомлений\n"
     "/survey — настроить интересы заново\n"
     "/favorites — избранное\n"
-    "/help — помощь"
+    "/settings — меню «Ещё»\n"
+    "/help — эта инструкция\n\n"
+    f"{HINT_FAVORITE}"
 )
 
 
@@ -130,6 +175,15 @@ async def send_more(bot: Bot, chat_id: int, *, bot_username: str = "") -> Messag
             settings.webapp_url,
             is_admin=_is_admin(chat_id),
         ),
+        link_preview_options=NO_PREVIEW,
+    )
+
+
+async def send_help(bot: Bot, chat_id: int) -> Message:
+    return await bot.send_message(
+        chat_id,
+        HELP_TEXT,
+        reply_markup=help_keyboard(),
         link_preview_options=NO_PREVIEW,
     )
 
@@ -276,11 +330,16 @@ async def cmd_start(
                 chat_id,
                 favorite_token,
                 bot_username=bot_username,
-                prefix="⭐ Добавил в избранное.",
+                prefix=(
+                    "⭐ Добавил в избранное.\n"
+                    "💡 Напомню за 7, 3 и 1 день и в день старта."
+                ),
             )
         else:
             await bot.send_message(
-                chat_id, "Эта ссылка устарела. Найдите старт заново."
+                chat_id,
+                "Эта ссылка устарела.\n\n"
+                "💡 Найдите старт заново — кнопка «🔍 Найти старт» в меню.",
             )
         await _delete_start_message(message)
     elif unfavorite_token:
@@ -297,7 +356,9 @@ async def cmd_start(
             )
         else:
             await bot.send_message(
-                chat_id, "Эта ссылка устарела. Найдите старт заново."
+                chat_id,
+                "Эта ссылка устарела.\n\n"
+                "💡 Найдите старт заново — кнопка «🔍 Найти старт» в меню.",
             )
         await _delete_start_message(message)
     else:
@@ -310,14 +371,7 @@ async def cmd_start(
 async def cmd_help(message: Message, bot: Bot, bot_username: str = "") -> None:
     if message.from_user is None:
         return
-    await bot.send_message(
-        message.from_user.id,
-        HELP_TEXT,
-        reply_markup=home_keyboard(
-            is_admin=message.from_user.id in settings.admin_ids
-        ),
-        link_preview_options=NO_PREVIEW,
-    )
+    await send_help(bot, message.from_user.id)
 
 
 @router.message(Command("survey"))
@@ -373,10 +427,16 @@ async def _handle_menu_action(
         await send_find_hub(bot, chat_id)
     elif action == "soon":
         await start_nearest(bot, chat_id, bot_username=bot_username)
+    elif action == "all":
+        await start_search(bot, chat_id, bot_username=bot_username)
     elif action == "sub":
         await show_subscription(bot, chat_id, bot_username=bot_username)
     elif action == "fav":
         await show_favorites(bot, chat_id, bot_username=bot_username)
+    elif action == "notify":
+        await show_notifications(bot, chat_id)
+    elif action == "help":
+        await send_help(bot, chat_id)
     elif action in {"more", "settings"}:
         await send_more(bot, chat_id, bot_username=bot_username)
     elif action == "partners":
@@ -442,7 +502,10 @@ async def free_text(
         return
 
     if len(text) < 2:
-        await message.answer("Напишите хотя бы два символа — например, «бег» или «Казань».")
+        await message.answer(
+            "Напишите хотя бы два символа — например, «бег» или «Казань».\n"
+            f"{HINT_HELP}"
+        )
         return
 
     await bot.send_chat_action(chat_id, "typing")
@@ -453,7 +516,8 @@ async def free_text(
 async def unknown_command(message: Message) -> None:
     command = (message.text or "").split(maxsplit=1)[0]
     await message.answer(
-        f"Не знаю команду {escape(command)}. Напишите запрос текстом или откройте меню.",
+        f"Не знаю команду {escape(command)}. Напишите запрос текстом или "
+        f"откройте меню.\n{HINT_HELP}",
         reply_markup=home_keyboard(
             is_admin=message.from_user.id in settings.admin_ids
         ),

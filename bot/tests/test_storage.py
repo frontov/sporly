@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+import sqlite3
 
 from app.storage import Database
 
@@ -19,6 +20,12 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
     async def test_user_attribution_and_subscription(self) -> None:
         user = await self.db.ensure_user(1, "roman", "Роман")
         self.assertEqual(user.chat_id, 1)
+        self.assertTrue(user.reminders_enabled)
+        self.assertTrue(await self.db.reminders_enabled(1))
+
+        toggled_reminders = await self.db.toggle_reminders(1)
+        self.assertFalse(toggled_reminders)
+        self.assertFalse(await self.db.reminders_enabled(1))
 
         await self.db.set_attribution(1, source="telegram_ad", campaign="may")
         await self.db.set_attribution(1, source="other", campaign="other")
@@ -31,6 +38,7 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(subscription.cities, ["Москва"])
         self.assertTrue(subscription.notify_enabled)
+        self.assertFalse(subscription.digest_enabled)
 
         toggled = await self.db.toggle_subscription(1, "notify_enabled")
         self.assertFalse(toggled.notify_enabled)
@@ -38,6 +46,35 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         await self.db.ensure_user(2)
         await self.db.set_referrer(2, 1)
         self.assertEqual(await self.db.referral_count(1), 1)
+
+    async def test_reminders_column_is_added_to_old_database(self) -> None:
+        path = Path(self.tempdir.name) / "old.db"
+        connection = sqlite3.connect(path)
+        connection.executescript(
+            """
+            CREATE TABLE users (
+                chat_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                source TEXT,
+                campaign TEXT,
+                referrer_id INTEGER,
+                onboarded INTEGER NOT NULL DEFAULT 0,
+                ui_version INTEGER NOT NULL DEFAULT 0,
+                survey_completed INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_active_at TEXT NOT NULL
+            );
+            """
+        )
+        connection.commit()
+        connection.close()
+
+        old_db = Database(path)
+        await old_db.init()
+        user = await old_db.ensure_user(5)
+        self.assertTrue(user.reminders_enabled)
+        self.assertTrue(await old_db.reminders_enabled(5))
 
     async def test_seen_events(self) -> None:
         await self.db.ensure_user(1)

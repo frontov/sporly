@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from app.hints import HINT_FAVORITE, HINT_HELP, HINT_TAP_DETAIL
 from app.keyboards import (
     BUTTON_FAVORITE,
     BUTTON_FAVORITED,
@@ -15,9 +16,11 @@ from app.keyboards import (
     event_detail_keyboard,
     favorites_list_keyboard,
     home_keyboard,
+    interests_saved_keyboard,
     menu_callback_for_text,
     more_keyboard,
     no_results_keyboard,
+    notification_settings_keyboard,
     search_hub_keyboard,
     search_list_keyboard,
     single_event_keyboard,
@@ -38,9 +41,112 @@ class MenuTextTest(unittest.TestCase):
         self.assertEqual(menu_callback_for_text("Мои события"), "menu:sub")
         self.assertEqual(menu_callback_for_text("🎯 Подписка"), "menu:sub")
         self.assertEqual(menu_callback_for_text("⚙️ Настройки"), "menu:more")
+        self.assertEqual(menu_callback_for_text("уведомления"), "menu:notify")
 
     def test_regular_query_is_not_a_menu(self) -> None:
         self.assertIsNone(menu_callback_for_text("забег в Казани"))
+
+    def test_help_aliases(self) -> None:
+        for label in ("помощь", "справка", "как пользоваться", "help"):
+            self.assertEqual(menu_callback_for_text(label), "menu:help")
+
+
+class HintTest(unittest.TestCase):
+    """Each screen should explain the next tap instead of staying silent."""
+
+    def test_hint_texts_are_short_and_non_empty(self) -> None:
+        for hint in (HINT_FAVORITE, HINT_HELP, HINT_TAP_DETAIL):
+            self.assertTrue(hint)
+            self.assertLessEqual(len(hint), 120)
+
+    def test_home_and_more_have_help_button(self) -> None:
+        for markup in (
+            home_keyboard(),
+            more_keyboard("sporly_bot", 1, "https://sporly.ru"),
+        ):
+            callbacks = {
+                button.callback_data
+                for row in markup.inline_keyboard
+                for button in row
+            }
+            self.assertIn("menu:help", callbacks)
+
+    def test_notifications_live_only_in_more(self) -> None:
+        home_callbacks = {
+            button.callback_data
+            for row in home_keyboard().inline_keyboard
+            for button in row
+        }
+        more_callbacks = {
+            button.callback_data
+            for row in more_keyboard("sporly_bot", 1, "https://sporly.ru").inline_keyboard
+            for button in row
+        }
+        saved_callbacks = {
+            button.callback_data
+            for row in interests_saved_keyboard().inline_keyboard
+            for button in row
+        }
+        self.assertNotIn("menu:notify", home_callbacks)
+        self.assertNotIn("menu:notify", saved_callbacks)
+        self.assertIn("menu:notify", more_callbacks)
+
+    def test_no_results_offers_helpful_exits(self) -> None:
+        callbacks = {
+            button.callback_data
+            for row in no_results_keyboard().inline_keyboard
+            for button in row
+        }
+        self.assertIn("menu:all", callbacks)
+        self.assertIn("menu:sub", callbacks)
+
+    def test_subscription_can_open_the_selection(self) -> None:
+        callbacks = {
+            button.callback_data
+            for row in subscription_keyboard(Subscription(chat_id=1)).inline_keyboard
+            for button in row
+        }
+        self.assertIn("menu:soon", callbacks)
+
+    def test_digest_is_off_by_default(self) -> None:
+        labels = [
+            button.text
+            for row in subscription_keyboard(Subscription(chat_id=1)).inline_keyboard
+            for button in row
+        ]
+        self.assertIn("📭 Дайджест: выкл", labels)
+
+    def test_notification_settings_are_independent(self) -> None:
+        markup = notification_settings_keyboard(
+            has_subscription=True,
+            notify_enabled=True,
+            digest_enabled=False,
+            reminders_enabled=True,
+        )
+        callbacks = {
+            button.callback_data
+            for row in markup.inline_keyboard
+            for button in row
+        }
+        self.assertTrue(
+            {"sub:toggle_notify", "sub:toggle_digest", "sub:toggle_reminders"}
+            <= callbacks
+        )
+
+    def test_reminders_can_be_configured_without_subscription(self) -> None:
+        markup = notification_settings_keyboard(
+            has_subscription=False,
+            reminders_enabled=False,
+        )
+        callbacks = {
+            button.callback_data
+            for row in markup.inline_keyboard
+            for button in row
+        }
+        self.assertIn("sub:toggle_reminders", callbacks)
+        self.assertIn("flow:new:onboarding", callbacks)
+        self.assertNotIn("sub:toggle_notify", callbacks)
+        self.assertNotIn("sub:toggle_digest", callbacks)
 
 
 class NavigationLabelsTest(unittest.TestCase):

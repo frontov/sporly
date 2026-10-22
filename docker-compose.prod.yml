@@ -54,6 +54,8 @@ services:
       PARTNER_CONTACT: ${PARTNER_CONTACT:-@fronteno}
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-900}
       DIGEST_HOUR_UTC: ${DIGEST_HOUR_UTC:-6}
+      QUIET_HOURS_START: ${QUIET_HOURS_START:-22}
+      QUIET_HOURS_END: ${QUIET_HOURS_END:-9}
       PARTNER_CONFIG_FILE: /app/app/config/partners.json
     volumes:
       - ./bot/app/data:/app/app/data

@@ -29,13 +29,21 @@ from app.formatting import (
     pick_image,
 )
 from app.links import event_click_url, share_url
+from app.hints import (
+    HINT_FAVORITE,
+    HINT_LIST_NAV,
+    HINT_OPEN_SITE,
+    HINT_TAP_DETAIL,
+)
 from app.keyboards import (
     BUTTON_FIND,
     BUTTON_HOME,
-    BUTTON_SETUP_INTERESTS,
+    BUTTON_SHOW_SOON,
     event_detail_keyboard,
     favorites_list_keyboard,
+    interests_saved_keyboard,
     no_results_keyboard,
+    notification_settings_keyboard,
     search_list_keyboard,
     single_event_keyboard,
     subscription_keyboard,
@@ -310,7 +318,9 @@ async def render_search_page(
             message,
             text=(
                 "😔 <b>Каталог временно недоступен</b>\n\n"
-                "Попробуйте ещё раз через минуту."
+                "Попробуйте ещё раз через минуту.\n"
+                "💡 Можно вернуться на главную или посмотреть сохранённое "
+                "в «⭐ Избранном»."
             ),
             markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -333,7 +343,15 @@ async def render_search_page(
             bot,
             chat_id,
             message,
-            text="<b>Ничего не нашлось</b>\n\n" + _session_summary(session),
+            text=(
+                "<b>Ничего не нашлось</b>\n\n"
+                + _session_summary(session)
+                + "\n\n"
+                "Что попробовать:\n"
+                "🔍 изменить запрос или выбрать другой регион,\n"
+                "🎯 проверить «Мои интересы»,\n"
+                "🌍 посмотреть все старты без фильтров."
+            ),
             markup=no_results_keyboard(),
         )
 
@@ -497,13 +515,19 @@ async def show_event_detail(
             bot,
             chat_id,
             message,
-            text="Эта карточка устарела. Откройте список заново.",
+            text=(
+                "Эта карточка устарела.\n\n"
+                "💡 Нажмите «🔍 Найти старт» и откройте её заново."
+            ),
             markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
+                            text=BUTTON_FIND, callback_data="menu:find"
+                        ),
+                        InlineKeyboardButton(
                             text=BUTTON_HOME, callback_data="menu:home"
-                        )
+                        ),
                     ]
                 ]
             ),
@@ -592,14 +616,23 @@ async def show_favorites(
             message,
             text=(
                 "<b>⭐ Избранное</b>\n\n"
-                "Пока пусто. Добавляйте старты звёздочкой — бот напомнит "
-                "за 7, 3 и 1 день."
+                "Здесь будут старты, которые вы сохранили.\n\n"
+                "<b>Как добавить:</b>\n"
+                "1. Откройте «🔍 Найти старт» или «🔥 Ближайшие».\n"
+                "2. Нажмите «Подробнее →» под стартом.\n"
+                "3. Нажмите «⭐ В избранное».\n\n"
+                "Бот напомнит за 7, 3 и 1 день до старта и в день старта."
             ),
             markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
                             text=BUTTON_FIND, callback_data="menu:find"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text=BUTTON_SHOW_SOON, callback_data="menu:soon"
                         )
                     ],
                     [
@@ -658,6 +691,9 @@ async def show_favorites(
         for index, favorite in enumerate(display_favorites, start=1)
     )
     text += "\n\nНапомним за 7, 3 и 1 день до старта."
+    text += "\n" + HINT_TAP_DETAIL
+    if total_pages > 1:
+        text += "\n" + HINT_LIST_NAV
 
     markup = favorites_list_keyboard(
         page=page,
@@ -692,7 +728,7 @@ async def save_interests(
         cities=cities,
         categories=categories,
         notify_enabled=existing.notify_enabled if existing else True,
-        digest_enabled=existing.digest_enabled if existing else True,
+        digest_enabled=existing.digest_enabled if existing else False,
     )
 
 
@@ -701,20 +737,20 @@ async def show_interests_saved(
     chat_id: int,
     subscription: Subscription,
 ) -> Message | None:
-    from app.config import settings
-    from app.keyboards import home_keyboard
-
     text = (
-        "<b>Готово</b>\n\n"
+        "<b>✅ Готово — подборка сохранена</b>\n\n"
         f"{filters_summary(subscription.cities, subscription.categories)}\n\n"
-        "«Ближайшие» теперь показывает только эти старты. "
-        "Изменить подборку можно в «Мои интересы»."
+        "<b>Куда дальше:</b>\n"
+        "🔥 «Смотреть ближайшие» — старты по этой подборке\n"
+        "🎯 «Мои интересы» — изменить фильтры и уведомления\n"
+        "🔍 «Найти старт» — поиск вручную\n\n"
+        "Новые подходящие старты пришлём автоматически."
     )
     return await _send_screen(
         bot,
         chat_id,
         text=text,
-        markup=home_keyboard(is_admin=chat_id in settings.admin_ids),
+        markup=interests_saved_keyboard(),
     )
 
 
@@ -782,17 +818,84 @@ async def finish_subscription(
         text += (
             f"Сейчас подходит <b>{total}</b> "
             f"{pluralize(total, 'старт', 'старта', 'стартов')}. "
-            "Пришлём, когда появятся новые."
+            "Пришлём, когда появятся новые.\n\n"
         )
     else:
-        text += "Каталог сейчас недоступен, но подписка сохранена."
+        text += "Каталог сейчас недоступен, но подписка сохранена.\n\n"
 
-    rows = subscription_keyboard(subscription).inline_keyboard
+    text += (
+        "<b>Куда нажать:</b>\n"
+        "🔥 «Смотреть ближайшие» — текущая подборка\n"
+        "🔔 «Новые старты по фильтрам» — раз в день одним сообщением\n"
+        "📬 «Дайджест» — раз в день утром\n"
+        "⏰ «Напоминания об избранном» — за 7, 3 и 1 день\n"
+        "✏️ «Изменить интересы» — поменять фильтры\n\n"
+        "🌙 Ночью уведомления не приходят."
+    )
+
+    reminders_enabled = await database.reminders_enabled(chat_id)
+    rows = subscription_keyboard(
+        subscription, reminders_enabled=reminders_enabled
+    ).inline_keyboard
     return await _send_screen(
         bot,
         chat_id,
         text=text,
         markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+async def show_notifications(
+    bot: Bot,
+    chat_id: int,
+    *,
+    message: Message | None = None,
+) -> Message | None:
+    subscription = await database.get_subscription(chat_id)
+    reminders_enabled = await database.reminders_enabled(chat_id)
+    has_subscription = subscription is not None
+
+    text = (
+        "<b>🔔 Уведомления</b>\n\n"
+        "Три независимые настройки — включите только то, что нужно.\n\n"
+        "🔔 <b>Новые старты по фильтрам</b> — раз в день одним сообщением, "
+        "когда появляются старты под «🎯 Мои интересы».\n"
+        "📬 <b>Дайджест</b> — раз в день утром: подборка ближайших стартов.\n"
+        "⏰ <b>Напоминания об избранном</b> — за 7, 3 и 1 день до старта "
+        "и в день старта. Работают отдельно от подписки.\n\n"
+        "🌙 Ночью бот не присылает уведомления.\n\n"
+    )
+    if subscription is not None:
+        text += (
+            "Сейчас: "
+            f"🔔 {'вкл' if subscription.notify_enabled else 'выкл'} · "
+            f"📬 {'вкл' if subscription.digest_enabled else 'выкл'} · "
+            f"⏰ {'вкл' if reminders_enabled else 'выкл'}\n\n"
+            "Фильтры для первых двух настраиваются в «🎯 Мои интересы»."
+        )
+    else:
+        text += (
+            "Сейчас: ⏰ напоминания "
+            f"<b>{'включены' if reminders_enabled else 'выключены'}</b>.\n\n"
+            "Чтобы присылать новые старты и дайджест, сначала настройте "
+            "интересы."
+        )
+
+    return await _edit_screen(
+        bot,
+        chat_id,
+        message,
+        text=text,
+        markup=notification_settings_keyboard(
+            has_subscription=has_subscription,
+            notify_enabled=(
+                subscription.notify_enabled if subscription else False
+            ),
+            digest_enabled=(
+                subscription.digest_enabled if subscription else False
+            ),
+            reminders_enabled=reminders_enabled,
+        ),
     )
 
 
@@ -804,6 +907,7 @@ async def show_subscription(
     bot_username: str = "",
 ) -> Message | None:
     subscription = await database.get_subscription(chat_id)
+    reminders_enabled = await database.reminders_enabled(chat_id)
     if subscription is None:
         return await _edit_screen(
             bot,
@@ -811,25 +915,19 @@ async def show_subscription(
             message,
             text=(
                 "<b>🎯 Мои интересы</b>\n\n"
-                "Выберите виды спорта и регионы. «Ближайшие» будет "
-                "показывать только эти старты, а бот сможет присылать "
-                "новые события.\n\n"
-                "Это бесплатно."
+                "Здесь вы выбираете, какие старты показывать в «🔥 Ближайших» "
+                "и присылать в уведомлениях.\n\n"
+                "<b>Как настроить:</b>\n"
+                "1. Нажмите «🎯 Настроить интересы».\n"
+                "2. Отметьте виды спорта — можно несколько.\n"
+                "3. Выберите регион или оставьте «🌍 Вся Россия».\n\n"
+                "⏰ Напоминания об избранном работают отдельно от подписки — "
+                "их можно включить или выключить ниже.\n\n"
+                "Это бесплатно, изменить можно в любой момент."
             ),
-            markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=BUTTON_SETUP_INTERESTS,
-                            callback_data="flow:new:onboarding",
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text=BUTTON_HOME, callback_data="menu:home"
-                        )
-                    ],
-                ]
+            markup=notification_settings_keyboard(
+                has_subscription=False,
+                reminders_enabled=reminders_enabled,
             ),
         )
 
@@ -857,14 +955,25 @@ async def show_subscription(
             f"\nПодходит сейчас: <b>{total}</b> "
             f"{pluralize(total, 'старт', 'старта', 'стартов')}.\n"
         )
-    text += "\nУведомления и дайджест — кнопками ниже."
+    text += (
+        "\n<b>Что делают кнопки:</b>\n"
+        "🔥 «Смотреть ближайшие» — показать подборку\n"
+        "🔔 новые старты по фильтрам — раз в день одним сообщением\n"
+        "📬 дайджест — раз в день утром\n"
+        "⏰ напоминания об избранном — за 7, 3 и 1 день\n"
+        "✏️ изменить — виды спорта и регионы\n"
+        "🗑 удалить — отключить подписку, избранное останется\n\n"
+        "🌙 Ночью уведомления не приходят."
+    )
 
     return await _edit_screen(
         bot,
         chat_id,
         message,
         text=text,
-        markup=subscription_keyboard(subscription),
+        markup=subscription_keyboard(
+            subscription, reminders_enabled=reminders_enabled
+        ),
     )
 
 
@@ -891,7 +1000,11 @@ async def show_single_event(
             bot,
             chat_id,
             message,
-            text="Эта ссылка устарела. Найдите старт заново через поиск.",
+            text=(
+                "Эта ссылка устарела.\n\n"
+                "💡 Найдите старт заново через поиск — карточка откроется "
+                "с актуальными деталями."
+            ),
             markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
@@ -912,6 +1025,8 @@ async def show_single_event(
     await database.remember_events([event.ref_payload()])
     is_favorite = await database.is_favorite(chat_id, event.id)
     text = (prefix + "\n\n" if prefix else "") + format_event_card(event)
+    if not prefix:
+        text += f"\n\n💡 ⭐ — напомним о старте · {HINT_OPEN_SITE}"
     markup = single_event_keyboard(
         token,
         event_click_url(chat_id, event.id, event.source_url),
@@ -1002,7 +1117,9 @@ async def show_partners_info(
         f"👥 Пользователей: <b>{overview['users_total']}</b>\n"
         f"🎯 Активных подписок: <b>{overview['subscriptions']}</b>\n\n"
         "Таргетинг — по виду спорта, региону и поисковому запросу.\n"
-        f"Связаться: {escape(settings.partner_contact)}"
+        f"Связаться: {escape(settings.partner_contact)}\n\n"
+        "💡 Нажмите «✍️ Написать», чтобы обсудить размещение. "
+        "«🏠 Домой» вернёт в меню."
     )
     contact = settings.partner_contact.lstrip("@")
     markup = InlineKeyboardMarkup(
