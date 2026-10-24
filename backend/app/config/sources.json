@@ -14,8 +14,8 @@
         "item": ".b-event-card",
         "title": "h3 a",
         "link": "h3 a",
-        "date": ".text-muted.mb-3",
-        "description": "p.mb-3.text-secondary",
+        "date": ".b-event-card__meta, .text-muted.mb-3",
+        "description": ".b-event-card__lead, p.mb-3.text-secondary",
         "image": ".b-event-card__image"
       }
     },

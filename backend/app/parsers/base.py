@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 from dateutil import parser as date_parser
@@ -386,9 +386,13 @@ class RegPlaceParser(CssDirectoryParser):
             if not title or not isinstance(href, str):
                 continue
 
-            meta_text = self._extract_text(card, ".text-muted.mb-3")
+            meta_text = self._extract_text(
+                card, ".b-event-card__meta, .text-muted.mb-3"
+            )
             date_text, city, category = self._parse_meta(meta_text)
-            description = self._extract_optional_text(card, "p.mb-3.text-secondary")
+            description = self._extract_optional_text(
+                card, ".b-event-card__lead, p.mb-3.text-secondary"
+            )
             image_url = self._extract_optional_attr(card, ".b-event-card__image", "src")
             full_link = urljoin(page_url, href)
             full_image = urljoin(page_url, image_url) if image_url else None
@@ -413,6 +417,38 @@ class RegPlaceParser(CssDirectoryParser):
             )
 
         return events
+
+    def extract_pagination_urls(self, html: str, page_url: str) -> list[str]:
+        # reg.place renders a pager with an ellipsis gap ("1 2 3 … 5 6"), so
+        # only a subset of page links is present. Walk every page up to the
+        # last one instead of following the visible links only.
+        soup = BeautifulSoup(html, "html.parser")
+        page_numbers: set[int] = set()
+        for link in soup.select(".pagination .page-link"):
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
+            match = re.search(r"[?&]page=(\d+)", href)
+            if match:
+                page_numbers.add(int(match.group(1)))
+
+        if not page_numbers:
+            return []
+
+        limit = max(self.config.max_pages - 1, 0)
+        parts = urlsplit(page_url)
+        base_query = [
+            (key, value) for key, value in parse_qsl(parts.query) if key != "page"
+        ]
+        urls: list[str] = []
+        for number in range(2, max(page_numbers) + 1):
+            if limit and len(urls) >= limit:
+                break
+            query = urlencode([*base_query, ("page", str(number))])
+            urls.append(
+                urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
+            )
+        return urls
 
     def _extract_regplace_event_urls(self, html: str, page_url: str) -> list[str]:
         matches = re.findall(r'/(events/[a-z0-9\-]+)', html)
@@ -447,9 +483,13 @@ class RegPlaceParser(CssDirectoryParser):
         if not title:
             return None
 
-        date_text = self._extract_optional_text(soup, "h2")
-        lead_text = self._extract_optional_text(soup, "p.lead.text-muted")
-        description_text = self._extract_optional_text(soup, ".event-description")
+        date_text = self._extract_regplace_date(soup)
+        lead_text = self._extract_optional_text(
+            soup, "p.event-page__lead, p.lead.text-muted"
+        )
+        description_text = self._extract_optional_text(
+            soup, "#about .event-description, .event-description"
+        )
         description_meta = soup.find("meta", attrs={"name": "description"})
         description_meta_text = (
             description_meta.get("content")
@@ -462,15 +502,35 @@ class RegPlaceParser(CssDirectoryParser):
             if keywords_meta and isinstance(keywords_meta.get("content"), str)
             else None
         )
-        image_url = self._extract_optional_attr(soup, ".cover .logo", "src")
+        image_url = self._extract_optional_attr(soup, ".event-page__image", "src") or (
+            self._extract_optional_attr(soup, ".cover .logo", "src")
+        )
+        if not image_url:
+            og_image = soup.find("meta", attrs={"property": "og:image"})
+            og_image_content = og_image.get("content") if og_image else None
+            if isinstance(og_image_content, str):
+                image_url = og_image_content.strip() or None
         page_location_text, venue = self._extract_regplace_location_block(soup)
+        hero_city, hero_region, hero_venue = self._extract_regplace_hero_place(soup)
         location_text = " ".join(
             part
-            for part in [lead_text, description_meta_text, keywords_text, page_location_text]
+            for part in [
+                lead_text,
+                description_meta_text,
+                keywords_text,
+                page_location_text,
+                hero_city,
+                hero_region,
+            ]
             if part
         ) or None
-        city = self._extract_regplace_city(location_text, title)
-        venue = venue or self._extract_regplace_venue(location_text)
+        city = self._extract_regplace_city(location_text, title) or hero_city
+        region = hero_region
+        venue = (
+            venue
+            or self._extract_regplace_venue(location_text)
+            or hero_venue
+        )
         category = self._extract_regplace_category(location_text or description_text or title)
         organizer_name = self._extract_regplace_organizer(soup)
         registration_status, registration_deadline = self._extract_regplace_registration_details(soup)
@@ -497,7 +557,7 @@ class RegPlaceParser(CssDirectoryParser):
                     title,
                 ),
                 city=city,
-                region=None,
+                region=region,
                 federal_district=None,
                 venue=venue,
                 category=category,
@@ -560,8 +620,10 @@ class RegPlaceParser(CssDirectoryParser):
                 return self._enrich_regplace_from_title(event)
 
         soup = BeautifulSoup(response.text, "html.parser")
-        date_text = event.date_text or self._extract_optional_text(soup, "h2")
-        lead_text = self._extract_optional_text(soup, "p.lead.text-muted")
+        date_text = self._extract_regplace_date(soup) or event.date_text
+        lead_text = self._extract_optional_text(
+            soup, "p.event-page__lead, p.lead.text-muted"
+        )
         description_meta = soup.find("meta", attrs={"name": "description"})
         description_text = (
             description_meta.get("content")
@@ -575,13 +637,31 @@ class RegPlaceParser(CssDirectoryParser):
             else None
         )
         page_location_text, page_venue = self._extract_regplace_location_block(soup)
+        hero_city, hero_region, hero_venue = self._extract_regplace_hero_place(soup)
         location_text = " ".join(
             part
-            for part in [lead_text, description_text, keywords_text, page_location_text]
+            for part in [
+                lead_text,
+                description_text,
+                keywords_text,
+                page_location_text,
+                hero_city,
+                hero_region,
+            ]
             if part
         ) or None
-        city = event.city or self._extract_regplace_city(location_text, event.title)
-        venue = event.venue or page_venue or self._extract_regplace_venue(location_text)
+        city = (
+            event.city
+            or self._extract_regplace_city(location_text, event.title)
+            or hero_city
+        )
+        region = event.region or hero_region
+        venue = (
+            event.venue
+            or page_venue
+            or self._extract_regplace_venue(location_text)
+            or hero_venue
+        )
         category = event.category or self._extract_regplace_category(location_text)
         organizer_name = event.organizer_name or self._extract_regplace_organizer(soup)
         registration_status, registration_deadline = self._extract_regplace_registration_details(soup)
@@ -599,8 +679,10 @@ class RegPlaceParser(CssDirectoryParser):
             event.model_copy(
                 update={
                     "date_text": date_text,
-                    "starts_at": self._normalize_datetime(date_text),
+                    "starts_at": self._normalize_datetime(date_text)
+                    or event.starts_at,
                     "city": city,
+                    "region": region,
                     "venue": venue,
                     "category": category,
                     "organizer_name": organizer_name,
@@ -618,6 +700,104 @@ class RegPlaceParser(CssDirectoryParser):
     def _enrich_regplace_from_title(self, event: Event) -> Event:
         city = event.city or self._extract_regplace_city(None, event.title)
         return event.model_copy(update={"city": city})
+
+    REGPLACE_NUMERIC_DATE_RE = re.compile(
+        r"(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?"
+    )
+    REGPLACE_REGION_RE = re.compile(
+        r"обл\b|област|край\b|республик|респ\b|автономн|\bокруг\b",
+        flags=re.IGNORECASE,
+    )
+
+    def _extract_regplace_hero_place(
+        self, soup: BeautifulSoup
+    ) -> tuple[str | None, str | None, str | None]:
+        # The hero line looks like "Спас-Каменка, Московская обл, г Дмитров, ...".
+        hero_text = self._extract_optional_text(soup, ".event-page__location span")
+        if not hero_text:
+            return None, None, None
+
+        parts = [
+            part.strip()
+            for part in re.split(r",", hero_text.replace("\xa0", " "))
+            if part.strip()
+        ]
+        if not parts:
+            return None, None, None
+
+        city, city_region = self._split_regplace_city(parts[0])
+        region = city_region or next(
+            (part for part in parts[1:] if self.REGPLACE_REGION_RE.search(part)),
+            None,
+        )
+        region = self._normalize_regplace_region(region)
+        venue = ", ".join(parts[1:]) or None
+        if venue and city and venue.strip().casefold() == city.casefold():
+            venue = None
+        return city, region, venue
+
+    def _split_regplace_city(
+        self, raw_city: str
+    ) -> tuple[str | None, str | None]:
+        value = re.sub(r"\s+", " ", raw_city).strip(" ,.")
+        if not value or len(value) > 60 or re.search(r"\d", value):
+            return None, None
+
+        parenthesized = re.match(r"^(.+?)\s*\(([^)]*)\)$", value)
+        if not parenthesized:
+            return value, None
+
+        city = parenthesized.group(1).strip(" ,.")
+        region_hint = parenthesized.group(2).strip(" ,.")
+        if self.REGPLACE_REGION_RE.search(region_hint):
+            return city or None, region_hint
+        return value, None
+
+    def _normalize_regplace_region(self, value: str | None) -> str | None:
+        if not value:
+            return None
+
+        region = re.sub(r"\s+", " ", value.replace("\xa0", " ")).strip(" ,.")
+        region = re.sub(r"^респ\.?\s+", "Республика ", region, flags=re.IGNORECASE)
+        region = re.sub(r"\bобл\.?$", "область", region, flags=re.IGNORECASE)
+        return region or None
+
+    def _extract_regplace_date(self, soup: BeautifulSoup) -> str | None:
+        # Current markup puts the date in the hero, e.g. "24.10.2026" or a
+        # range like "30.10–01.11.2026". Older markup used the first h2.
+        date_text = self._extract_optional_text(soup, ".event-page__date")
+        normalized = self._normalize_regplace_numeric_date(date_text)
+        if normalized:
+            return normalized
+
+        for heading in soup.select("h2"):
+            text = heading.get_text(" ", strip=True)
+            if self._parse_russian_date(text) or self.REGPLACE_NUMERIC_DATE_RE.search(text):
+                return text
+        return None
+
+    def _normalize_regplace_numeric_date(self, raw_value: str | None) -> str | None:
+        if not raw_value:
+            return None
+
+        value = re.sub(r"\s+", " ", raw_value.replace("\xa0", " ")).strip()
+        match = self.REGPLACE_NUMERIC_DATE_RE.search(value)
+        if not match:
+            return self._parse_russian_date(value)
+
+        year_text = match.group(3)
+        if year_text is None:
+            tail = re.search(r"(\d{4})\s*$", value)
+            year_text = tail.group(1) if tail else str(datetime.now().year)
+        year = int(year_text)
+        if year < 100:
+            year += 2000
+
+        try:
+            start = datetime(year, int(match.group(2)), int(match.group(1)))
+        except ValueError:
+            return None
+        return start.strftime("%d.%m.%Y")
 
     def _extract_regplace_location_block(
         self,
@@ -702,7 +882,9 @@ class RegPlaceParser(CssDirectoryParser):
         return None
 
     def _extract_regplace_organizer(self, soup: BeautifulSoup) -> str | None:
-        title = self._extract_optional_text(soup, ".organizer-card .card-title")
+        title = self._extract_optional_text(
+            soup, ".event-page__organiser-name, .organizer-card .card-title"
+        )
         return title or None
 
     def _extract_regplace_registration_details(
@@ -710,7 +892,9 @@ class RegPlaceParser(CssDirectoryParser):
         soup: BeautifulSoup,
     ) -> tuple[str | None, str | None]:
         cta = self._extract_optional_text(soup, ".btn-cta")
-        deadline_text = self._extract_optional_text(soup, ".links .small.text-center")
+        deadline_text = self._extract_optional_text(
+            soup, ".event-page__registration-note, .links .small.text-center"
+        )
         status = None
         if cta:
             normalized = cta.casefold()
@@ -721,30 +905,63 @@ class RegPlaceParser(CssDirectoryParser):
 
         deadline = None
         if deadline_text:
-            normalized_deadline = re.sub(r"\s+", " ", deadline_text).strip()
-            deadline = (
-                normalized_deadline
-                if normalized_deadline.casefold().startswith("до ")
-                else f"до {normalized_deadline}"
-            )
+            normalized_deadline = re.sub(
+                r"\s+", " ", deadline_text.replace("\xa0", " ")
+            ).strip()
+            match = re.search(r"(?:^|\s)до\s+(.+)$", normalized_deadline, flags=re.IGNORECASE)
+            if match:
+                normalized_deadline = match.group(1).strip()
+            if normalized_deadline:
+                deadline = f"до {normalized_deadline}"
         return status, deadline
 
     def _extract_regplace_price(self, soup: BeautifulSoup) -> str | None:
         values: list[int] = []
-        for cta in soup.select(".race-card__actions .btn-cta"):
-            text = cta.get_text(" ", strip=True)
-            if "бесплатн" in text.casefold():
+        for card in soup.select(".race-card"):
+            price_text = self._extract_regplace_current_price_text(card)
+            if not price_text:
+                continue
+            if "бесплатн" in price_text.casefold():
                 return "от 0 ₽"
-            match = re.search(r"(\d[\d\s]{2,6})\s*₽", text)
-            if not match:
-                continue
-            try:
-                values.append(int(re.sub(r"\s+", "", match.group(1))))
-            except ValueError:
-                continue
+            amount = self._parse_regplace_price_value(price_text)
+            if amount is not None:
+                values.append(amount)
+
+        if not values:
+            for cta in soup.select(".race-card__actions .btn-cta"):
+                text = cta.get_text(" ", strip=True)
+                if "бесплатн" in text.casefold():
+                    return "от 0 ₽"
+                amount = self._parse_regplace_price_value(text)
+                if amount is not None:
+                    values.append(amount)
+
         if not values:
             return None
         return f"от {min(values)} ₽"
+
+    def _extract_regplace_current_price_text(self, card: Any) -> str | None:
+        variants = card.select(".race-price__variant")
+        if not variants:
+            return None
+
+        active = [
+            variant
+            for variant in variants
+            if "race-price__variant--crossed-out" not in (variant.get("class") or [])
+        ]
+        node = active[-1] if active else variants[-1]
+        return re.sub(r"\s+", " ", node.get_text(" ", strip=True))
+
+    def _parse_regplace_price_value(self, text: str) -> int | None:
+        match = re.search(r"(\d[\d\s\u00a0\u202f]*(?:[.,]\d{1,2})?)\s*₽", text)
+        if not match:
+            return None
+        raw_value = re.sub(r"[\s\u00a0\u202f]", "", match.group(1)).replace(",", ".")
+        try:
+            return int(round(float(raw_value)))
+        except ValueError:
+            return None
 
     def _extract_regplace_distance_summary(
         self,
