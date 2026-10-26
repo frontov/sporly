@@ -33,11 +33,14 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
-      - bot
     expose:
       - "80"
 
   bot:
+    # Production bot runs on its own VPS (deploy/bot/README.md). The service is
+    # kept here for a single-server setup and is started only on demand:
+    #   docker compose --profile bot up -d --build
+    profiles: ["bot"]
     build:
       context: ./bot
     container_name: sporly-bot

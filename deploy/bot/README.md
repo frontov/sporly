@@ -60,10 +60,28 @@ curl https://go.sporly.ru/health
 # {"status":"ok"}
 ```
 
+## Обновление
+
+The bot VPS keeps a copy of `bot/`, not the whole repository: sync it from the
+checkout and rebuild the container.
+
+```bash
+rsync -az --delete-excluded \
+  --exclude '.venv/' --exclude '__pycache__/' --exclude '*.pyc' \
+  --exclude '.env' --exclude 'app/data/' --exclude '.DS_Store' \
+  bot/ root@146.103.124.234:/opt/sporly-bot/bot/
+ssh root@146.103.124.234 'cd /opt/sporly-bot && docker compose up -d --build'
+```
+
+`./data` (SQLite) and `./bot/app/config/partners.json` are mounted into the
+container, so the sync must not touch them.
+
 ## Notes
 
 - Only one bot instance may poll Telegram. Stop any local/dev instance before
-  starting the production container.
+  starting the production container. The `bot` service in the root
+  `docker-compose.prod.yml` is behind the `bot` profile and does not start on
+  the main server by default.
 - The bot connects outbound to Telegram and to `https://sporly.ru`; it does not
   need an inbound port except through Caddy.
 - Partner and event click tracking work only when `PUBLIC_BASE_URL` is set.
