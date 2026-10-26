@@ -95,7 +95,7 @@ python -m unittest discover -s tests -v
 | `POLL_INTERVAL_SECONDS` | как часто проверять новые события (по умолчанию 900) |
 | `DIGEST_HOUR_UTC` | час отправки дайджеста в UTC (по умолчанию 6 = 9:00 МСК) |
 | `REMINDER_CHECK_INTERVAL_SECONDS` | частота проверки напоминаний |
-| `MAX_NOTIFICATIONS_PER_TICK` | максимум событий в одном ежедневном сообщении о новых стартах |
+| `MAX_NOTIFICATIONS_PER_TICK` | максимум событий в одном ежедневном сообщении о новых стартах (в списке по 4 на страницу) |
 | `QUIET_HOURS_START` | начало тихих часов по Москве (по умолчанию 22) |
 | `QUIET_HOURS_END` | конец тихих часов по Москве (по умолчанию 9) |
 | `DATABASE_FILE` | путь к SQLite, по умолчанию `app/data/sporly.db` |

@@ -17,7 +17,7 @@ from aiogram.types import (
     Message,
 )
 
-from app.api_client import Event, EventQuery, api_client, today_iso
+from app.api_client import Event, EventQuery, EventsPage, api_client, today_iso
 from app.context import database, partner_registry, search_sessions
 from app.formatting import (
     clean_text,
@@ -288,6 +288,21 @@ def _session_summary(session: SearchSession) -> str:
     return summary
 
 
+def _snapshot_page(session: SearchSession, page: int) -> EventsPage:
+    events = session.events or []
+    total = len(events)
+    total_pages = max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1)
+    current = min(max(page, 1), total_pages)
+    start = (current - 1) * PAGE_SIZE
+    return EventsPage(
+        items=events[start : start + PAGE_SIZE],
+        total=total,
+        page=current,
+        page_size=PAGE_SIZE,
+        total_pages=total_pages,
+    )
+
+
 async def render_search_page(
     bot: Bot,
     chat_id: int,
@@ -297,48 +312,58 @@ async def render_search_page(
     message: Message | None = None,
     bot_username: str = "",
     notify: bool = False,
+    silent: bool = False,
 ) -> Message | None:
-    try:
-        result = await api_client.get_events(
-            EventQuery(
-                query=session.query,
-                cities=session.cities,
-                categories=session.categories,
-                date_from=today_iso(),
-                page=max(page, 1),
-                page_size=PAGE_SIZE,
-                sort_by="date_asc",
+    if session.events is not None:
+        result = _snapshot_page(session, page)
+    else:
+        try:
+            result = await api_client.get_events(
+                EventQuery(
+                    query=session.query,
+                    cities=session.cities,
+                    categories=session.categories,
+                    date_from=today_iso(),
+                    page=max(page, 1),
+                    page_size=PAGE_SIZE,
+                    sort_by="date_asc",
+                )
             )
-        )
-    except Exception as error:
-        logger.exception("Search failed: %s", error)
-        return await _edit_screen(
-            bot,
-            chat_id,
-            message,
-            text=(
-                "😔 <b>Каталог временно недоступен</b>\n\n"
-                "Попробуйте ещё раз через минуту.\n"
-                "💡 Можно вернуться на главную или посмотреть сохранённое "
-                "в «⭐ Избранном»."
-            ),
-            markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=BUTTON_FIND, callback_data="menu:find"
-                        ),
-                        InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
+        except Exception as error:
+            logger.exception("Search failed: %s", error)
+            if silent:
+                return None
+            return await _edit_screen(
+                bot,
+                chat_id,
+                message,
+                text=(
+                    "😔 <b>Каталог временно недоступен</b>\n\n"
+                    "Попробуйте ещё раз через минуту.\n"
+                    "💡 Можно вернуться на главную или посмотреть сохранённое "
+                    "в «⭐ Избранном»."
+                ),
+                markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text=BUTTON_FIND, callback_data="menu:find"
+                            ),
+                            InlineKeyboardButton(
+                                text=BUTTON_HOME, callback_data="menu:home"
+                            ),
+                        ]
                     ]
-                ]
-            ),
-        )
+                ),
+            )
 
     session.page = result.page
     session.total = result.total
     session.total_pages = max(result.total_pages, 1)
 
     if not result.items:
+        if silent:
+            return None
         return await _edit_screen(
             bot,
             chat_id,
@@ -379,6 +404,7 @@ async def render_search_page(
         page=result.page,
         total_pages=result.total_pages,
         filters=_session_summary(session),
+        title=session.title,
         page_size=PAGE_SIZE,
         bot_username=bot_username,
         session_id=session.id,

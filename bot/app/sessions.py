@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import secrets
 import time
 
+from app.api_client import Event
+
 
 @dataclass(slots=True)
 class SearchSession:
@@ -17,6 +19,10 @@ class SearchSession:
     page: int = 1
     total: int = 0
     total_pages: int = 1
+    # Fixed event snapshot shown instead of a live catalog query. Used by
+    # proactive messages such as the daily new-events digest.
+    events: list[Event] | None = None
+    title: str = "Ближайшие старты"
 
     @property
     def filters_selected(self) -> bool:
@@ -35,6 +41,8 @@ class SearchSessionStore:
         query: str | None = None,
         cities: list[str] | None = None,
         categories: list[str] | None = None,
+        events: list[Event] | None = None,
+        title: str = "Ближайшие старты",
     ) -> SearchSession:
         self._prune()
         session = SearchSession(
@@ -44,6 +52,8 @@ class SearchSessionStore:
             cities=list(cities or []),
             categories=list(categories or []),
             created_at=time.time(),
+            events=list(events) if events is not None else None,
+            title=title,
         )
         self._items[session.id] = session
         return session

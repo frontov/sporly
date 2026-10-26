@@ -14,11 +14,12 @@ from aiogram.types import (
 
 from app.api_client import Event, EventQuery, api_client, today_iso
 from app.config import settings
-from app.context import database
+from app.context import database, search_sessions
 from app.flows import (
     _event_tokens,
     _favorite_ids,
     _find_partner,
+    render_search_page,
 )
 from app.formatting import (
     clean_text,
@@ -122,69 +123,44 @@ def is_new_since(first_seen_at: str | None, cutoff: str | None) -> bool:
     return first_seen_dt >= cutoff_dt
 
 
+NEW_EVENTS_TITLE = "🆕 Новые старты по вашим интересам"
+
+
 async def _send_new_events_batch(
     bot: Bot,
     subscription: Subscription,
     events: list[Event],
-) -> None:
-    """Send all fresh events for one user as a single daily message."""
+    *,
+    bot_username: str = "",
+) -> bool:
+    """Send fresh events as the same list screen as «Ближайшие старты»."""
 
     chat_id = subscription.chat_id
-    tracked_urls = {
-        event.id: event_click_url(chat_id, event.id, event.source_url)
-        for event in events
-    }
-    display_events = [
-        event.model_copy(update={"source_url": tracked_urls.get(event.id)})
-        for event in events
-    ]
-    text = (
-        "<b>🆕 Новые старты по вашим интересам</b>\n"
-        f"{filters_summary(subscription.cities, subscription.categories)}\n\n"
-        "💡 ⭐ с номером — сохранить в избранное, «🌐 Открыть» — сайт "
-        "организатора.\n\n"
-        + "\n\n".join(
-            format_digest_event(event, index)
-            for index, event in enumerate(display_events, start=1)
-        )
-    )
-
-    tokens = await _event_tokens(events)
-    favorites = await _favorite_ids(chat_id)
-    rows: list[list[InlineKeyboardButton]] = []
-    for index, event in enumerate(events, start=1):
-        token = tokens[event.id]
-        is_favorite = event.id in favorites
-        row = [
-            InlineKeyboardButton(
-                text=f"{'✅' if is_favorite else '⭐'} {index}",
-                callback_data=f"unfv:{token}" if is_favorite else f"fv:{token}",
-            )
-        ]
-        source_url = tracked_urls.get(event.id)
-        if source_url and len(source_url) <= 240:
-            row.append(InlineKeyboardButton(text=BUTTON_OPEN, url=source_url))
-        rows.append(row)
-
-    rows.append(
-        [InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub")]
-    )
-    rows.append(
-        [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")]
-    )
-
-    await bot.send_message(
+    session = search_sessions.create(
         chat_id,
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-        link_preview_options=NO_PREVIEW,
+        cities=subscription.cities,
+        categories=subscription.categories,
+        events=events,
+        title=NEW_EVENTS_TITLE,
     )
+    sent = await render_search_page(
+        bot,
+        chat_id,
+        session,
+        page=1,
+        bot_username=bot_username,
+        silent=True,
+    )
+    if sent is None:
+        return False
+
     for event in events:
         await database.mark_seen(chat_id, [event.id])
         await database.log_event(chat_id, "notification_sent", event.id)
     await database.log_event(
         chat_id, "new_events_digest_sent", str(len(events))
     )
+    return True
 
 
 async def check_new_events(bot: Bot, bot_username: str = "") -> int:
@@ -255,15 +231,17 @@ async def check_new_events(bot: Bot, bot_username: str = "") -> int:
             if not fresh:
                 continue
 
-            limit = max(1, min(settings.max_notifications_per_tick, 8))
+            limit = max(1, min(settings.max_notifications_per_tick, 24))
             batch = fresh[:limit]
             try:
-                await _send_new_events_batch(
+                delivered = await _send_new_events_batch(
                     bot,
                     subscription,
                     batch,
+                    bot_username=bot_username,
                 )
-                sent_total += 1
+                if delivered:
+                    sent_total += 1
             except Exception as error:
                 logger.warning(
                     "Cannot send new events batch to %s: %s",

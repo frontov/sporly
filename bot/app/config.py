@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 900
     digest_hour_utc: int = 6
     reminder_check_interval_seconds: int = 3600
-    max_notifications_per_tick: int = 4
+    max_notifications_per_tick: int = 12
     # Quiet hours are in Moscow time. Outside this window the bot sends
     # nothing proactively: no new-event digests and no reminders.
     quiet_hours_start: int = 22
