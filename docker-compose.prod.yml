@@ -57,6 +57,10 @@ services:
       QUIET_HOURS_START: ${QUIET_HOURS_START:-22}
       QUIET_HOURS_END: ${QUIET_HOURS_END:-9}
       PARTNER_CONFIG_FILE: /app/app/config/partners.json
+    # api.telegram.org resolves to an address filtered by the hosting provider
+    # on this VPS, while this Telegram frontend IP stays reachable.
+    extra_hosts:
+      - "api.telegram.org:${TELEGRAM_API_IP:-149.154.167.220}"
     volumes:
       - ./bot/app/data:/app/app/data
       - ./bot/app/config/partners.json:/app/app/config/partners.json:ro
