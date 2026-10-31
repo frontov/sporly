@@ -228,5 +228,54 @@ class NewEventTest(unittest.TestCase):
         )
 
 
+class SeenIdentityTest(unittest.IsolatedAsyncioTestCase):
+    async def test_old_indexed_event_id_is_not_sent_again(self) -> None:
+        event = Event(
+            id="myrace-46-4ab3bb1a6722",
+            title="6 Колец Кондратовских полей",
+            source_url="https://myrace.info/events/2094",
+            starts_at="2099-08-22T00:00:00",
+            first_seen_at="2026-10-22T18:00:00+00:00",
+        )
+        subscription = Subscription(
+            chat_id=1,
+            cities=[],
+            categories=[],
+            created_at="2026-10-19T18:00:00+00:00",
+            updated_at="2026-10-19T18:00:00+00:00",
+        )
+
+        with (
+            patch.object(scheduler, "is_quiet_hours", return_value=False),
+            patch.object(
+                scheduler.database,
+                "active_subscriptions",
+                AsyncMock(return_value=[subscription]),
+            ),
+            patch.object(
+                scheduler.database,
+                "interactions_today",
+                AsyncMock(return_value=0),
+            ),
+            patch.object(
+                scheduler.database,
+                "seen_identities",
+                AsyncMock(return_value={"4ab3bb1a6722"}),
+            ),
+            patch.object(
+                scheduler.api_client,
+                "get_events",
+                AsyncMock(return_value=SimpleNamespace(items=[event])),
+            ),
+            patch.object(
+                scheduler, "_send_new_events_batch", AsyncMock()
+            ) as send,
+        ):
+            sent = await scheduler.check_new_events(AsyncMock())
+
+        self.assertEqual(sent, 0)
+        send.assert_not_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()

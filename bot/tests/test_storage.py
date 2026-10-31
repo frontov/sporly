@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 import sqlite3
 
-from app.storage import Database
+from app.storage import Database, event_identity, stable_event_id
 
 
 class DatabaseTest(unittest.IsolatedAsyncioTestCase):
@@ -80,6 +80,89 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         await self.db.ensure_user(1)
         await self.db.mark_seen(1, ["a", "b", "a"])
         self.assertEqual(await self.db.seen_ids(1), {"a", "b"})
+
+    async def test_seen_identities_ignore_the_old_row_index(self) -> None:
+        await self.db.ensure_user(1)
+        await self.db.mark_seen(
+            1,
+            [
+                "myrace-45-4ab3bb1a6722",
+                "myrace-46-4ab3bb1a6722",
+                "otime-9-bade1889f29d",
+            ],
+        )
+
+        identities = await self.db.seen_identities(1)
+
+        self.assertEqual(identities, {"4ab3bb1a6722", "bade1889f29d"})
+        self.assertEqual(
+            event_identity("myrace-46-4ab3bb1a6722"),
+            event_identity("myrace-4ab3bb1a6722"),
+        )
+        self.assertEqual(
+            stable_event_id("myrace-46-4ab3bb1a6722"),
+            "myrace-4ab3bb1a6722",
+        )
+
+    async def test_favorites_use_stable_event_ids(self) -> None:
+        await self.db.ensure_user(1)
+        await self.db.add_favorite(
+            1,
+            {
+                "event_id": "myrace-45-4ab3bb1a6722",
+                "title": "Забег",
+                "starts_at": "2026-06-01T00:00:00",
+                "date_text": "01.06.2026",
+                "source_url": "https://example.com/event",
+                "city": "Москва",
+                "region": "Москва",
+                "category": "Бег",
+            },
+        )
+
+        self.assertTrue(await self.db.is_favorite(1, "myrace-4ab3bb1a6722"))
+        favorites = await self.db.favorites(1)
+        self.assertEqual(favorites[0].event_id, "myrace-4ab3bb1a6722")
+
+        self.assertTrue(await self.db.remove_favorite(1, "myrace-4ab3bb1a6722"))
+        self.assertEqual(await self.db.favorites(1), [])
+
+    async def test_old_favorite_ids_are_migrated_on_open(self) -> None:
+        await self.db.ensure_user(1)
+        with sqlite3.connect(self.db.path) as connection:
+            connection.execute(
+                """
+                INSERT INTO favorites
+                    (chat_id, event_id, title, starts_at, date_text,
+                     source_url, city, region, category, reminded_offsets,
+                     created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    "myrace-45-4ab3bb1a6722",
+                    "Забег",
+                    "2026-06-01T00:00:00",
+                    "01.06.2026",
+                    "https://example.com/event",
+                    "Москва",
+                    "Москва",
+                    "Бег",
+                    '["7"]',
+                    "2026-05-01T00:00:00",
+                ),
+            )
+            connection.execute(
+                "DELETE FROM meta WHERE key = 'event_ids_stabilized_v1'"
+            )
+            connection.commit()
+
+        reopened = Database(self.db.path)
+        await reopened.init()
+
+        favorites = await reopened.favorites(1)
+        self.assertEqual(favorites[0].event_id, "myrace-4ab3bb1a6722")
+        self.assertEqual(favorites[0].reminded_offsets, ["7"])
 
     async def test_favorites_and_reminders(self) -> None:
         await self.db.ensure_user(1)

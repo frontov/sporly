@@ -29,7 +29,7 @@ from app.formatting import (
 )
 from app.keyboards import BUTTON_HOME, BUTTON_INTERESTS, BUTTON_OPEN
 from app.links import event_click_url
-from app.storage import Favorite, Subscription
+from app.storage import Favorite, Subscription, event_identity
 from app.text import (
     MOSCOW_TZ,
     REMINDER_OFFSETS,
@@ -216,12 +216,12 @@ async def check_new_events(bot: Bot, bot_username: str = "") -> int:
             if already_sent:
                 continue
 
-            seen = await database.seen_ids(subscription.chat_id)
+            seen = await database.seen_identities(subscription.chat_id)
             cutoff = subscription.updated_at or subscription.created_at
             fresh = [
                 event
                 for event in page.items
-                if event.id not in seen
+                if event_identity(event.id) not in seen
                 and (
                     event.starts_at is None
                     or (days_until(event.starts_at) or 0) >= 0

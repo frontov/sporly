@@ -9,11 +9,54 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Iterable
 
 
 logger = logging.getLogger(__name__)
+
+
+_EVENT_ID_WITH_INDEX_RE = re.compile(
+    r"^(?P<prefix>.+?)-(?:\d+)-(?P<stable>[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
+_EVENT_ID_WITH_HASH_RE = re.compile(
+    r"^(?P<prefix>.+?)-(?P<stable>[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
+
+
+def stable_event_id(event_id: str | None) -> str:
+    """Drop the parser row index from an event id.
+
+    Older parsers produced ``myrace-45-4ab3bb1a6722``; the same event could
+    become ``myrace-46-4ab3bb1a6722`` after a source reordered its listing.
+    The canonical form is ``myrace-4ab3bb1a6722``.
+    """
+
+    value = str(event_id or "").strip()
+    match = _EVENT_ID_WITH_INDEX_RE.match(value)
+    if match is None:
+        return value
+    return f"{match.group('prefix')}-{match.group('stable').lower()}"
+
+
+def event_identity(event_id: str | None) -> str:
+    """Stable identity used for seen events and favorites.
+
+    It intentionally ignores the source prefix and the old row index, so
+    ``myrace-45-4ab3bb1a6722`` and the new ``myrace-4ab3bb1a6722`` compare
+    equal. The stable hash is derived from the event URL by the backend.
+    """
+
+    value = str(event_id or "").strip()
+    match = _EVENT_ID_WITH_INDEX_RE.match(value)
+    if match is None:
+        match = _EVENT_ID_WITH_HASH_RE.match(value)
+    if match is None:
+        return value
+    return match.group("stable").lower()
 
 
 def utc_now() -> str:
@@ -311,6 +354,7 @@ class Database:
                     "ALTER TABLE users ADD COLUMN reminders_enabled INTEGER NOT NULL DEFAULT 1"
                 )
             self._migrate_legacy_json(connection)
+            self._migrate_event_ids(connection)
 
     def _migrate_legacy_json(self, connection: sqlite3.Connection) -> None:
         row = connection.execute(
@@ -426,6 +470,78 @@ class Database:
             logger.info("Migrated %s legacy subscriptions", migrated)
         connection.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('legacy_json_migrated', ?)",
+            (utc_now(),),
+        )
+        connection.commit()
+
+    def _migrate_event_ids(self, connection: sqlite3.Connection) -> None:
+        """Remove the old row index from saved favorites once.
+
+        Favorites are keyed by event id. Without this migration an event saved
+        as ``myrace-45-...`` would look different from the new stable
+        ``myrace-...`` id.
+        """
+
+        row = connection.execute(
+            "SELECT value FROM meta WHERE key = 'event_ids_stabilized_v1'"
+        ).fetchone()
+        if row:
+            return
+
+        rows = connection.execute(
+            "SELECT chat_id, event_id, reminded_offsets FROM favorites"
+        ).fetchall()
+        migrated = 0
+        for favorite in rows:
+            old_id = str(favorite["event_id"])
+            new_id = stable_event_id(old_id)
+            if new_id == old_id:
+                continue
+
+            existing = connection.execute(
+                """
+                SELECT reminded_offsets FROM favorites
+                WHERE chat_id = ? AND event_id = ?
+                """,
+                (favorite["chat_id"], new_id),
+            ).fetchone()
+            if existing is not None:
+                offsets = sorted(
+                    set(_loads_list(existing["reminded_offsets"]))
+                    | set(_loads_list(favorite["reminded_offsets"]))
+                )
+                connection.execute(
+                    """
+                    UPDATE favorites SET reminded_offsets = ?
+                    WHERE chat_id = ? AND event_id = ?
+                    """,
+                    (
+                        json.dumps(offsets, ensure_ascii=False),
+                        favorite["chat_id"],
+                        new_id,
+                    ),
+                )
+                connection.execute(
+                    "DELETE FROM favorites WHERE chat_id = ? AND event_id = ?",
+                    (favorite["chat_id"], old_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE favorites SET event_id = ?
+                    WHERE chat_id = ? AND event_id = ?
+                    """,
+                    (new_id, favorite["chat_id"], old_id),
+                )
+            migrated += 1
+
+        if migrated:
+            logger.info("Stabilized %s favorite event ids", migrated)
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO meta (key, value)
+            VALUES ('event_ids_stabilized_v1', ?)
+            """,
             (utc_now(),),
         )
         connection.commit()
@@ -780,6 +896,12 @@ class Database:
             ).fetchall()
         return {str(row["event_id"]) for row in rows}
 
+    async def seen_identities(self, chat_id: int) -> set[str]:
+        """Seen event identities, independent of the parser row index."""
+
+        ids = await self.seen_ids(chat_id)
+        return {event_identity(event_id) for event_id in ids}
+
     async def mark_seen(self, chat_id: int, event_ids: Iterable[str]) -> None:
         ids = [str(event_id) for event_id in event_ids if event_id]
         if not ids:
@@ -819,7 +941,7 @@ class Database:
                 """,
                 (
                     chat_id,
-                    str(event["event_id"]),
+                    stable_event_id(str(event["event_id"])),
                     str(event.get("title") or "Событие"),
                     event.get("starts_at"),
                     event.get("date_text"),
@@ -840,8 +962,11 @@ class Database:
     def _remove_favorite_sync(self, chat_id: int, event_id: str) -> bool:
         with self._db() as connection:
             cursor = connection.execute(
-                "DELETE FROM favorites WHERE chat_id = ? AND event_id = ?",
-                (chat_id, event_id),
+                """
+                DELETE FROM favorites
+                WHERE chat_id = ? AND event_id IN (?, ?)
+                """,
+                (chat_id, str(event_id), stable_event_id(event_id)),
             )
             connection.commit()
             return cursor.rowcount > 0
@@ -852,8 +977,11 @@ class Database:
     def _is_favorite_sync(self, chat_id: int, event_id: str) -> bool:
         with self._db() as connection:
             row = connection.execute(
-                "SELECT 1 FROM favorites WHERE chat_id = ? AND event_id = ?",
-                (chat_id, event_id),
+                """
+                SELECT 1 FROM favorites
+                WHERE chat_id = ? AND event_id IN (?, ?)
+                """,
+                (chat_id, str(event_id), stable_event_id(event_id)),
             ).fetchone()
         return row is not None
 
@@ -906,8 +1034,12 @@ class Database:
     def _mark_reminded_sync(self, chat_id: int, event_id: str, offset: str) -> None:
         with self._db() as connection:
             row = connection.execute(
-                "SELECT reminded_offsets FROM favorites WHERE chat_id = ? AND event_id = ?",
-                (chat_id, event_id),
+                """
+                SELECT event_id, reminded_offsets FROM favorites
+                WHERE chat_id = ? AND event_id IN (?, ?)
+                LIMIT 1
+                """,
+                (chat_id, str(event_id), stable_event_id(event_id)),
             ).fetchone()
             if row is None:
                 return
@@ -916,7 +1048,11 @@ class Database:
                 offsets.append(offset)
             connection.execute(
                 "UPDATE favorites SET reminded_offsets = ? WHERE chat_id = ? AND event_id = ?",
-                (json.dumps(offsets, ensure_ascii=False), chat_id, event_id),
+                (
+                    json.dumps(offsets, ensure_ascii=False),
+                    chat_id,
+                    row["event_id"],
+                ),
             )
             connection.commit()
 

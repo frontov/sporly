@@ -57,6 +57,90 @@ from app.settings import settings
 logger = logging.getLogger(__name__)
 
 
+_EVENT_ID_WITH_INDEX_RE = re.compile(
+    r"^(?P<prefix>.+?)-(?P<index>\d+)-(?P<stable>[0-9a-f]{12})$"
+)
+
+# Tokens that are common enough to be added to an event title by one source
+# without making it a different event (e.g. "Полумарафон «Бегущая Вологда»"
+# vs "Бегущая Вологда").
+GENERIC_TITLE_TOKENS: frozenset[str] = frozenset(
+    {
+        "чемпионат",
+        "первенство",
+        "кубок",
+        "турнир",
+        "соревнование",
+        "соревнования",
+        "фестиваль",
+        "серия",
+        "марафон",
+        "полумарафон",
+        "веломарафон",
+        "забег",
+        "пробег",
+        "трейл",
+        "гонка",
+        "открытый",
+        "открытая",
+        "открытое",
+        "всероссийский",
+        "всероссийская",
+        "всероссийское",
+        "международный",
+        "международная",
+        "международное",
+        "городской",
+        "городская",
+        "городское",
+        "спортивный",
+        "спортивная",
+        "спортивное",
+        "официальный",
+        "annual",
+        "race",
+        "run",
+        "running",
+        "marathon",
+        "half",
+        "trail",
+        "cup",
+        "championship",
+        "festival",
+        "series",
+        "event",
+    }
+)
+
+# Extra words that mean the two cards are related but not the same start:
+# a kids race, another distance, a stage, a relay, etc.
+VARIANT_TITLE_MARKERS: tuple[str, ...] = (
+    "дет",
+    "kids",
+    "child",
+    "семейн",
+    "family",
+    "эстафет",
+    "relay",
+    "мил",
+    "mile",
+    "час",
+    "hour",
+    "групп",
+    "group",
+    "этап",
+    "stage",
+    "дистанц",
+    "мужчин",
+    "женщин",
+    "юниор",
+    "юнош",
+    "девуш",
+    "ветеран",
+    "master",
+)
+
+
 @dataclass(slots=True)
 class EventFilters:
     query: str | None = None
@@ -920,7 +1004,9 @@ class CatalogService:
                     ", ".join(empty_sources),
                 )
 
-            normalized_events = self._normalize_events(collected_events)
+            normalized_events = self._deduplicate(
+                self._normalize_events(collected_events)
+            )
             active_cached_count = sum(
                 1 for event in self._cache if event.status != "inactive"
             )
@@ -1038,8 +1124,10 @@ class CatalogService:
                 return
             items = payload.get("items", [])
             created_at = payload.get("created_at", 0.0)
-            self._cache = self._normalize_events(
-                [Event.model_validate(item) for item in items]
+            self._cache = self._deduplicate(
+                self._normalize_events(
+                    [Event.model_validate(item) for item in items]
+                )
             )
             self._cache_created_at = float(created_at)
             if self._cache_created_at:
@@ -1405,6 +1493,7 @@ class CatalogService:
 
         result.extend(unique_by_url.values())
         result = self._deduplicate_by_signature(result)
+        result = self._deduplicate_related(result)
         return sorted(
             result,
             key=lambda item: (
@@ -1430,6 +1519,108 @@ class CatalogService:
 
         return [*passthrough, *deduped.values()]
 
+    def _deduplicate_related(self, events: list[Event]) -> list[Event]:
+        """Collapse obvious cross-source title variants.
+
+        The strict signature above needs the titles to match exactly. Different
+        sources often add a sponsor, a year, a generic word or an emoji. This
+        pass only compares events from different sources, on the same date and
+        in the same region, and refuses to merge titles that differ by a
+        distance, stage, kids race, relay, etc.
+        """
+
+        removed: set[int] = set()
+        buckets: dict[tuple[str, str], list[Event]] = {}
+
+        for event in events:
+            scope = self._dedupe_scope_key(event)
+            if scope is None:
+                continue
+
+            bucket = buckets.setdefault(scope, [])
+            match_index: int | None = None
+            for index, existing in enumerate(bucket):
+                if existing.source_name == event.source_name:
+                    continue
+                if self._titles_describe_same_event(
+                    existing.title, event.title
+                ):
+                    match_index = index
+                    break
+
+            if match_index is None:
+                bucket.append(event)
+                continue
+
+            existing = bucket[match_index]
+            if self._should_replace_duplicate(existing, event):
+                removed.add(id(existing))
+                bucket[match_index] = event
+            else:
+                removed.add(id(event))
+
+        if not removed:
+            return events
+        return [event for event in events if id(event) not in removed]
+
+    def _dedupe_scope_key(self, event: Event) -> tuple[str, str] | None:
+        normalized_date = (
+            event.starts_at or self._parse_date_text(event.date_text) or ""
+        )[:10]
+        normalized_location = self._normalize_location_name(
+            event.region
+        ) or self._normalize_location_name(event.city)
+        if not normalized_date or not normalized_location:
+            return None
+        return (normalized_date, normalized_location.casefold())
+
+    def _titles_describe_same_event(
+        self, first: str | None, second: str | None
+    ) -> bool:
+        first_tokens = set(
+            self._normalize_title_for_dedupe(first).split()
+        )
+        second_tokens = set(
+            self._normalize_title_for_dedupe(second).split()
+        )
+        if not first_tokens or not second_tokens:
+            return False
+        if first_tokens == second_tokens:
+            return True
+
+        if len(first_tokens) <= len(second_tokens):
+            smaller, larger = first_tokens, second_tokens
+        else:
+            smaller, larger = second_tokens, first_tokens
+
+        if not smaller < larger:
+            return False
+
+        # "Забег" / "Кубок" without any concrete token is too generic to merge.
+        if not any(token not in GENERIC_TITLE_TOKENS for token in smaller):
+            return False
+
+        extra = larger - smaller
+        if len(extra) > 3:
+            return False
+
+        for token in extra:
+            if token in GENERIC_TITLE_TOKENS:
+                continue
+            if any(marker in token for marker in VARIANT_TITLE_MARKERS):
+                return False
+            if any(character.isdigit() for character in token):
+                return False
+        return True
+
+    def _stabilize_event_id(self, event_id: str | None) -> str:
+        if not event_id:
+            return ""
+        match = _EVENT_ID_WITH_INDEX_RE.match(str(event_id))
+        if match is None:
+            return str(event_id)
+        return f"{match.group('prefix')}-{match.group('stable')}"
+
     def _semantic_dedupe_key(self, event: Event) -> tuple[str, str, str] | None:
         normalized_title = self._normalize_title_for_dedupe(event.title)
         normalized_date = (event.starts_at or self._parse_date_text(event.date_text) or "")[:10]
@@ -1447,7 +1638,23 @@ class CatalogService:
         if not title:
             return ""
         normalized = title.casefold().replace("ё", "е")
-        normalized = re.sub(r"[\"'`«»„“”()]+", " ", normalized)
+
+        # "Бегущая Вологда (05.12-06.12)" and "... 17 мая 2026" are the same
+        # race as "Бегущая Вологда" / "Галичское Заозерье".
+        normalized = re.sub(
+            r"\(\s*\d{1,2}[./-]\d{1,2}"
+            r"(?:\s*[-–—]\s*\d{1,2}[./-]\d{1,2})?\s*\)",
+            " ",
+            normalized,
+        )
+        normalized = re.sub(
+            r"\b\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|"
+            r"июля|августа|сентября|октября|ноября|декабря)"
+            r"(?:\s+20\d{2})?\b",
+            " ",
+            normalized,
+        )
+
         normalized = re.sub(
             r"^\d+\s*[-йя]?\s*этап\s+tri\s*niti\s+cup\s*[-—–:]\s*",
             "",
@@ -1463,6 +1670,17 @@ class CatalogService:
             "",
             normalized,
         )
+
+        # Strip quotes, emoji and other punctuation; keep letters/digits.
+        normalized = re.sub(r"[^\w\s]+", " ", normalized)
+        normalized = re.sub(r"\b(?:19|20)\d{2}\b", " ", normalized)
+        normalized = re.sub(
+            r"^\s*[ivxlcdmіх]+\s*(?:[-–—.:]\s*)?(?:й|я)?\s+",
+            "",
+            normalized,
+        )
+        # Stylised "МарафонЪ" from one source vs "Марафон" from another.
+        normalized = re.sub(r"ъ\b", "", normalized)
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return normalized
 
@@ -1571,6 +1789,10 @@ class CatalogService:
         series_slug, series_name = self._detect_series(event)
         return event.model_copy(
             update={
+                # The parser-level id used to contain the row index. That made
+                # the same event change identity whenever a source reordered
+                # its listing. Keep only source + stable URL hash from now on.
+                "id": self._stabilize_event_id(event.id),
                 "region": normalized_region,
                 "city": self._normalize_city(event.city, normalized_region),
                 "category": self._normalize_category(event.category),

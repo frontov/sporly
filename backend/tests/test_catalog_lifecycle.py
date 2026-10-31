@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import time
 import unittest
@@ -15,17 +16,22 @@ def make_event(
     source: str = "A",
     status: str = "active",
     miss_count: int = 0,
+    event_id: str | None = None,
+    title: str | None = None,
+    city: str = "Москва",
+    region: str = "Москва",
+    source_url: str | None = None,
 ) -> Event:
     return Event(
-        id=f"{source}-{index}",
-        title=f"Event {index}",
-        city="Москва",
-        region="Москва",
+        id=event_id or f"{source}-{index}",
+        title=title or f"Event {index}",
+        city=city,
+        region=region,
         category="Бег",
         starts_at="2026-11-01T00:00:00",
         date_text="01.11.2026",
         source_name=source,
-        source_url=f"https://example.com/{source}/{index}",
+        source_url=source_url or f"https://example.com/{source}/{index}",
         miss_count=miss_count,
         status=status,
     )
@@ -125,6 +131,118 @@ class CatalogLifecycleTest(unittest.TestCase):
         )
 
         self.assertEqual(filtered, [])
+
+    def test_event_id_drops_listing_index(self) -> None:
+        event = make_event(
+            0,
+            event_id="myrace-95-4ab3bb1a6722",
+            title="6 Колец Кондратовских полей",
+        )
+
+        normalized = self.service._normalize_event(event)
+
+        self.assertEqual(normalized.id, "myrace-4ab3bb1a6722")
+
+    def test_title_variants_are_merged_across_sources(self) -> None:
+        first = make_event(
+            1,
+            source="Russia Running",
+            event_id="russiarunning-abcdef123456",
+            title="IХ Полумарафон «Бегущая Вологда» (05.12-06.12)",
+            city="Вологда",
+            region="Вологодская область",
+        )
+        second = make_event(
+            2,
+            source="Get.run",
+            event_id="getrun-123456abcdef",
+            title="Бегущая Вологда 2026",
+            city="Вологда",
+            region="Вологодская область",
+        )
+
+        deduped = self.service._deduplicate([first, second])
+
+        self.assertEqual(len(deduped), 1)
+
+    def test_variant_distances_are_not_merged(self) -> None:
+        first = make_event(
+            1,
+            source="IRONSTAR",
+            event_id="ironstar-abcdef123456",
+            title="IRONSTAR 1/4 ЗАВИДОВО 2027",
+            city="Завидово",
+            region="Тверская область",
+        )
+        second = make_event(
+            2,
+            source="IRONSTAR",
+            event_id="ironstar-123456abcdef",
+            title="IRONSTAR 1/8 ЗАВИДОВО 2027",
+            city="Завидово",
+            region="Тверская область",
+        )
+
+        deduped = self.service._deduplicate([first, second])
+
+        self.assertEqual(len(deduped), 2)
+
+    def test_kids_race_is_not_merged_with_adult_race(self) -> None:
+        first = make_event(
+            1,
+            source="Gran Fondo",
+            event_id="granfondo-abcdef123456",
+            title="Granfondo Волоколамск",
+            city="Волоколамск",
+            region="Московская область",
+        )
+        second = make_event(
+            2,
+            source="Gran Fondo",
+            event_id="granfondo-123456abcdef",
+            title="Granfondo Волоколамск Дети",
+            city="Волоколамск",
+            region="Московская область",
+        )
+
+        deduped = self.service._deduplicate([first, second])
+
+        self.assertEqual(len(deduped), 2)
+
+    def test_persistent_cache_is_deduplicated_on_load(self) -> None:
+        duplicate_one = make_event(
+            1,
+            source="A",
+            event_id="A-10-aaaaaaaaaaaa",
+            title="Томилинский веломарафон",
+            region="Московская область",
+        )
+        duplicate_two = make_event(
+            2,
+            source="B",
+            event_id="B-20-bbbbbbbbbbbb",
+            title="Томилинский веломарафон 2026",
+            region="Московская область",
+        )
+        settings.cache_file.write_text(
+            json.dumps(
+                {
+                    "version": settings.cache_version,
+                    "created_at": time.time(),
+                    "items": [
+                        duplicate_one.model_dump(mode="json"),
+                        duplicate_two.model_dump(mode="json"),
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = CatalogService()
+
+        self.assertEqual(len(loaded._cache), 1)
+        self.assertEqual(loaded._cache[0].id, "A-aaaaaaaaaaaa")
 
 
 if __name__ == "__main__":
