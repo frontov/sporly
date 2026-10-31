@@ -5894,8 +5894,11 @@ class StrengthCalendarParser(CssDirectoryParser):
         description: str | None = None,
         image_url: str | None = None,
         venue: str | None = None,
+        identity: str | None = None,
     ) -> Event:
-        stable_hash = hashlib.sha1(source_url.encode("utf-8")).hexdigest()[:12]
+        stable_hash = hashlib.sha1(
+            (identity or source_url).encode("utf-8")
+        ).hexdigest()[:12]
         prefix = re.sub(r"\s+", "-", self.config.name.lower())
         return Event(
             id=f"{prefix}-{index}-{stable_hash}",
@@ -5926,7 +5929,55 @@ class StrengthCalendarParser(CssDirectoryParser):
             return None, None
         if len(parts) == 1:
             return parts[0], None
+        venue_markers = (
+            "фитнес",
+            "клуб",
+            "зал",
+            "арена",
+            "стадион",
+            "комплекс",
+            "дом культуры",
+            "дк ",
+            "ул.",
+            "улица",
+        )
+        if any(marker in parts[1].casefold() for marker in venue_markers):
+            # "Новороссийск, Фитнес клуб «FitZone»" — the second part is a
+            # venue, not a region.
+            return parts[0], None
         return parts[0], parts[1]
+
+    def _clean_region_hint(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        cleaned = re.sub(r"\s+", " ", value.replace("\xa0", " ")).strip(" ,")
+        # WRPF sometimes glues federation versions to the country:
+        # "WEPF/WSF/WAF Приднестровская Молдавская Республика".
+        cleaned = re.sub(
+            r"^(?:[A-ZА-ЯЁ]{2,}(?:/[A-ZА-ЯЁ]{2,})*)\s+",
+            "",
+            cleaned,
+        ).strip(" ,")
+        if not cleaned or cleaned.casefold() == "россия":
+            return None
+        if any(
+            marker in cleaned.casefold()
+            for marker in (
+                "пауэрлифтинг",
+                "двоебор",
+                "жим",
+                "тяга",
+                "присед",
+                "бицепс",
+                "логлифт",
+                "hip thrust",
+                "стритлифтинг",
+                "версиям",
+            )
+        ):
+            # The source glued the end of a title to the location.
+            return None
+        return cleaned
 
     def _split_nbc_location(
         self, value: str | None
@@ -5943,10 +5994,6 @@ class StrengthCalendarParser(CssDirectoryParser):
     def _safe_year(self, value: str | int) -> int:
         year = int(value)
         return year + 2000 if year < 100 else year
-
-    def _strength_fragment(self, *parts: object) -> str:
-        key = "|".join(str(part or "") for part in parts)
-        return str(int(hashlib.sha1(key.encode("utf-8")).hexdigest()[:12], 16))
 
     def _find_numeric_date(
         self, text: str, default_year: int | None = None
@@ -6117,9 +6164,14 @@ class FprCalendarParser(StrengthCalendarParser):
                 if len(cells) >= 10
                 else ""
             )
-            source_url = (
-                f"{page_url}#event-"
-                f"{self._strength_fragment(page_url, title, starts_at.isoformat())}"
+            source_url = page_url
+            identity = "|".join(
+                [
+                    page_url,
+                    title,
+                    starts_at.isoformat(),
+                    city or "",
+                ]
             )
             events.append(
                 self._strength_event(
@@ -6128,6 +6180,7 @@ class FprCalendarParser(StrengthCalendarParser):
                     source_url=source_url,
                     starts_at=starts_at,
                     city=city or None,
+                    identity=identity,
                     description=re.sub(
                         r"\s+", " ", cells[5].get_text(" ", strip=True)
                     ).strip()
@@ -6406,30 +6459,34 @@ class WrpfCalendarParser(StrengthCalendarParser):
             if len(location_chunks) == 1:
                 location_value = location_chunks[0]
                 if "/" in location_value:
-                    _, _, tail = location_value.partition("/")
-                    city, region = tail.strip() or None, None
+                    head, _, tail = location_value.rpartition("/")
+                    city = tail.strip() or None
+                    region = self._clean_region_hint(head)
                 else:
                     city, region = self._strength_location(location_value)
             else:
-                _, _, region_hint = location_chunks[0].partition("/")
+                _, _, region_hint = location_chunks[0].rpartition("/")
                 city = location_chunks[-1]
-                region = (
-                    location_chunks[-2]
-                    if len(location_chunks) >= 3
-                    else (region_hint.strip() or None)
-                )
-            source_url = (
-                f"{page_url}#event-"
-                f"{self._strength_fragment(page_url, title, starts_at.isoformat(), city, region)}"
-            )
+                region = self._clean_region_hint(region_hint)
+                if not region and len(location_chunks) == 2:
+                    region = location_chunks[1]
             events.append(
                 self._strength_event(
                     index=len(events),
                     title=title,
-                    source_url=source_url,
+                    source_url=page_url,
                     starts_at=starts_at,
                     city=city,
                     region=region,
+                    identity="|".join(
+                        [
+                            page_url,
+                            title,
+                            starts_at.isoformat(),
+                            city or "",
+                            region or "",
+                        ]
+                    ),
                 )
             )
         return events

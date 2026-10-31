@@ -9,6 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.api_client import api_client
+from app.categories import CANONICAL_CATEGORIES, normalize_categories
 from app.flows import (
     delete_current_screen,
     finish_subscription,
@@ -29,23 +30,7 @@ class FlowStates(StatesGroup):
     waiting_city = State()
 
 
-DEFAULT_CATEGORIES = [
-    "Бег",
-    "Велоспорт",
-    "Лыжи",
-    "Триатлон",
-    "Плавание",
-    "Ходьба",
-    "Ориентирование и туризм",
-    "Единоборства",
-    "Силовые виды",
-    "Бадминтон",
-    "ГТО",
-    "Детские старты",
-    "Легкая атлетика",
-    "Другие",
-    "ARDF, радиоспорт",
-]
+DEFAULT_CATEGORIES = list(CANONICAL_CATEGORIES)
 
 PINNED_REGIONS = [
     "Москва",
@@ -68,6 +53,7 @@ async def _options() -> tuple[list[str], list[str]]:
     if not categories:
         categories = list(DEFAULT_CATEGORIES)
     else:
+        categories = normalize_categories(categories)
         order = {value: index for index, value in enumerate(DEFAULT_CATEGORIES)}
         categories = sorted(
             set(categories),
@@ -142,6 +128,7 @@ async def _edit(
 
 async def _render_categories(callback: CallbackQuery, state: FSMContext) -> None:
     data = await _state_data(state)
+    data["categories"] = normalize_categories(data["categories"])
     _, categories = await _options()
     for value in data["categories"]:
         if value not in categories:
@@ -179,7 +166,9 @@ async def _render_cities(callback: CallbackQuery, state: FSMContext) -> None:
 
 async def send_onboarding(bot: Bot, chat_id: int, state: FSMContext) -> Message | None:
     subscription = await database.get_subscription(chat_id)
-    categories_selected = list(subscription.categories) if subscription else []
+    categories_selected = (
+        normalize_categories(subscription.categories) if subscription else []
+    )
     cities_selected = list(subscription.cities) if subscription else []
     await state.clear()
     await state.update_data(

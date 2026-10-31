@@ -8,7 +8,7 @@ import secrets
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from app.schemas.event import CalendarEvent, CalendarEventsResponse, EventsResponse
@@ -150,6 +150,28 @@ def _resolve_slug(slug: str, values: list[str]) -> str | None:
         if _slugify_text(value) == slug:
             return value
     return None
+
+
+# Old category names that were indexed before the catalog switched to the
+# consolidated section list. Redirect them instead of returning 404.
+LEGACY_SPORT_SLUGS = {
+    "orientirovanie-i-turizm": "Ориентирование",
+    "ardf-radiosport": "Ориентирование",
+    "fastpaking": "Ориентирование",
+    "skaysnou": "Лыжи",
+    "hodba": "Бег",
+    "boevye-iskusstva": "Разное",
+    "detskie-starty": "Разное",
+    "edinoborstva": "Разное",
+    "drugie": "Разное",
+    "drugoe": "Разное",
+    "badminton": "Разное",
+    "ezdovoy-sport": "Разное",
+    "ezdovoj-sport": "Разное",
+    "gonki-priklyuchencheskie-s-prepyatstviyami": "Разное",
+    "fidzhital": "Разное",
+    "legkaya-atletika": "Разное",
+}
 
 
 def _is_pure_region_option(value: str) -> bool:
@@ -614,10 +636,20 @@ async def seo_region(region_slug: str) -> HTMLResponse:
 
 
 @app.get("/seo/sport/{category_slug}", response_class=HTMLResponse)
-async def seo_sport(category_slug: str) -> HTMLResponse:
+async def seo_sport(category_slug: str) -> Response:
     _, available_categories, _ = catalog_service.get_filter_metadata()
     category = _resolve_slug(category_slug, available_categories)
     if not category:
+        legacy_category = LEGACY_SPORT_SLUGS.get(category_slug)
+        if legacy_category:
+            resolved = _resolve_slug(
+                _slugify_text(legacy_category), available_categories
+            )
+            if resolved:
+                return RedirectResponse(
+                    url=f"/seo/sport/{_slugify_text(resolved)}",
+                    status_code=301,
+                )
         raise HTTPException(status_code=404, detail="Category not found")
 
     today = datetime.now().date().isoformat()

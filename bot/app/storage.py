@@ -13,6 +13,8 @@ import re
 import sqlite3
 from typing import Any, Iterable
 
+from app.categories import normalize_categories
+
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +147,10 @@ def _loads_list(value: str | None) -> list[str]:
     return [str(item) for item in parsed if str(item).strip()]
 
 
+def _loads_categories(value: str | None) -> list[str]:
+    return normalize_categories(_loads_list(value))
+
+
 def parse_search_payload(payload: str | None) -> dict[str, Any]:
     if not payload:
         return {"query": "", "cities": [], "categories": []}
@@ -156,13 +162,17 @@ def parse_search_payload(payload: str | None) -> dict[str, Any]:
         return {
             "query": str(parsed.get("query") or ""),
             "cities": [str(value) for value in parsed.get("cities") or []],
-            "categories": [str(value) for value in parsed.get("categories") or []],
+            "categories": normalize_categories(
+                str(value) for value in parsed.get("categories") or []
+            ),
         }
     parts = (payload or "").split("|")
     return {
         "query": parts[0] if len(parts) > 0 else "",
         "cities": [value for value in (parts[1] if len(parts) > 1 else "").split(",") if value],
-        "categories": [value for value in (parts[2] if len(parts) > 2 else "").split(",") if value],
+        "categories": normalize_categories(
+            (parts[2] if len(parts) > 2 else "").split(",")
+        ),
     }
 
 
@@ -400,7 +410,10 @@ class Database:
                         (
                             chat_id,
                             json.dumps(raw.get("cities") or [], ensure_ascii=False),
-                            json.dumps(raw.get("categories") or [], ensure_ascii=False),
+                            json.dumps(
+                                normalize_categories(raw.get("categories") or []),
+                                ensure_ascii=False,
+                            ),
                             int(bool(raw.get("notify_enabled", True))),
                             int(bool(raw.get("digest_enabled", False))),
                             now,
@@ -751,7 +764,7 @@ class Database:
         return Subscription(
             chat_id=int(row["chat_id"]),
             cities=_loads_list(row["cities"]),
-            categories=_loads_list(row["categories"]),
+            categories=_loads_categories(row["categories"]),
             notify_enabled=bool(row["notify_enabled"]),
             digest_enabled=bool(row["digest_enabled"]),
             last_digest_day=row["last_digest_day"],
@@ -803,7 +816,9 @@ class Database:
                 (
                     chat_id,
                     json.dumps(cities, ensure_ascii=False),
-                    json.dumps(categories, ensure_ascii=False),
+                    json.dumps(
+                        normalize_categories(categories), ensure_ascii=False
+                    ),
                     int(notify_enabled),
                     int(digest_enabled),
                     now,
@@ -863,7 +878,7 @@ class Database:
             Subscription(
                 chat_id=int(row["chat_id"]),
                 cities=_loads_list(row["cities"]),
-                categories=_loads_list(row["categories"]),
+                categories=_loads_categories(row["categories"]),
                 notify_enabled=bool(row["notify_enabled"]),
                 digest_enabled=bool(row["digest_enabled"]),
                 last_digest_day=row["last_digest_day"],
@@ -1601,7 +1616,9 @@ class Database:
             "subscription": (
                 {
                     "cities": _loads_list(subscription_row["cities"]),
-                    "categories": _loads_list(subscription_row["categories"]),
+                    "categories": _loads_categories(
+                        subscription_row["categories"]
+                    ),
                 }
                 if subscription_row
                 else None

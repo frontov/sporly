@@ -73,7 +73,7 @@ export const CalendarView = ({
           const isToday = key === todayKey;
           const isSelected = key === selectedDay;
           const categories = Array.from(
-            new Set(dayEvents.map((event) => event.category ?? "Другие"))
+            new Set(dayEvents.map((event) => event.category ?? "Разное"))
           );
           const visibleCategories = categories.slice(0, 4);
           const extraCategoryCount = categories.length - visibleCategories.length;

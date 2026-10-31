@@ -53,7 +53,7 @@ class StrengthCategoryTest(unittest.TestCase):
     def test_does_not_confuse_light_athletics_with_weightlifting(self) -> None:
         self.assertEqual(
             CatalogService._normalize_category(None, "Легкая атлетика"),
-            "Легкая атлетика",
+            "Разное",
         )
 
 
@@ -83,7 +83,11 @@ class FprCalendarTest(unittest.TestCase):
         self.assertEqual(events[0].city, "Нижний Тагил")
         self.assertEqual(events[1].starts_at, "2026-01-24T00:00:00")
         self.assertEqual(events[0].category, "Силовые виды")
-        self.assertIn("#event-", str(events[0].source_url))
+        self.assertEqual(
+            str(events[0].source_url), "https://fpr-info.ru/kalendar.htm"
+        )
+        self.assertNotIn("#", str(events[0].source_url))
+        self.assertEqual(len({event.id for event in events}), len(events))
 
     def test_decodes_windows_1251_calendar(self) -> None:
         parser = make_parser(FprCalendarParser)
@@ -187,8 +191,60 @@ class WrpfCalendarTest(unittest.TestCase):
         self.assertEqual(events[0].starts_at, "2026-01-31T00:00:00")
         self.assertEqual(events[0].city, "Москва")
         self.assertEqual(
+            str(events[0].source_url),
+            "https://russia-powerlifting.ru/kalendar/kalendar-sorevnovanij-2026",
+        )
+        self.assertNotIn("#", str(events[0].source_url))
+        self.assertEqual(
             events[0].title,
             "Всероссийский турнир «World Class» по пауэрлифтингу, силовому двоеборью и жиму лежа",
+        )
+
+    def test_events_from_one_calendar_page_have_unique_ids(self) -> None:
+        page = """
+        <article class="item-page">
+          <ol>
+            <li><p>Первый турнир по пауэрлифтингу, Россия / Москва, 10.01.2027</p></li>
+            <li><p>Второй турнир по пауэрлифтингу, Россия / Москва, 11.01.2027</p></li>
+          </ol>
+        </article>
+        """
+
+        events = make_parser(WrpfCalendarParser).parse(
+            page,
+            "https://russia-powerlifting.ru/kalendar/kalendar-sorevnovanij-2027",
+        )
+
+        self.assertEqual(len(events), 2)
+        self.assertEqual(len({event.id for event in events}), 2)
+        self.assertEqual(
+            {str(event.source_url) for event in events},
+            {"https://russia-powerlifting.ru/kalendar/kalendar-sorevnovanij-2027"},
+        )
+
+    def test_prefers_region_hint_over_city_chunk(self) -> None:
+        page = """
+        <article class="item-page">
+          <ol><li><p>Открытый турнир «Натухаевская» по пауэрлифтингу,
+          Россия / Краснодарский край, Новороссийск, Натухаевская,
+          10-12.01.2027</p></li></ol>
+        </article>
+        """
+
+        events = make_parser(WrpfCalendarParser).parse(
+            page,
+            "https://russia-powerlifting.ru/kalendar/kalendar-sorevnovanij-2027",
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].city, "Натухаевская")
+        self.assertEqual(events[0].region, "Краснодарский край")
+
+    def test_does_not_treat_venue_as_region(self) -> None:
+        parser = make_parser(WrpfCalendarParser)
+        self.assertEqual(
+            parser._strength_location("Новороссийск, Фитнес клуб «FitZone»"),
+            ("Новороссийск", None),
         )
 
 

@@ -65,6 +65,27 @@ from app.settings import settings
 logger = logging.getLogger(__name__)
 
 
+# Events from the combined "Ориентирование и туризм" source category are
+# split by title: hiking, climbing, tourism and Nordic walking go to
+# "Разное", the rest stays in "Ориентирование".
+TOURISM_TITLE_MARKERS = (
+    "туризм",
+    "турист",
+    "поход",
+    "турслет",
+    "турслёт",
+    "маршрут",
+    "экспедиц",
+    "скалолаз",
+    "скалодром",
+    "альпинизм",
+    "ледолаз",
+    "ходьб",
+    "северн",
+    "скандинав",
+)
+
+
 _EVENT_ID_WITH_INDEX_RE = re.compile(
     r"^(?P<prefix>.+?)-(?P<index>\d+)-(?P<stable>[0-9a-f]{12})$"
 )
@@ -270,6 +291,7 @@ class CatalogService:
         "Московская область": (
             "московская область",
             "подмосков",
+            "долгопрудный",
             "истра",
             "ромашково",
             "волоколамск",
@@ -353,6 +375,9 @@ class CatalogService:
             "краснодарский край",
             "краснодар",
             "сочи",
+            "новороссийск",
+            "анапа",
+            "геленджик",
             "красная поляна",
             "эсто-садок",
             "курорт газпром",
@@ -1046,6 +1071,7 @@ class CatalogService:
                 checked_at,
                 source_counts,
             )
+            next_events = self._deduplicate(next_events)
             next_events = self._apply_featured_flags(next_events)
 
             self._cache = next_events
@@ -1200,18 +1226,22 @@ class CatalogService:
             ]
 
         threshold = max(settings.event_miss_threshold, 1)
-        old_by_url: dict[str, Event] = {}
+        old_by_url: dict[tuple[str, str], Event] = {}
         old_by_signature: dict[tuple[str, str, str], Event] = {}
+        old_by_title_date: dict[tuple[str, str, str], Event] = {}
         for event in previous:
             source_url = self._canonical_source_url(str(event.source_url))
             if source_url:
-                old_by_url.setdefault(source_url, event)
+                old_by_url.setdefault((source_url, event.id), event)
             signature = self._semantic_dedupe_key(event)
             if signature:
                 old_by_signature.setdefault(signature, event)
+            title_date = self._title_date_key(event)
+            if title_date:
+                old_by_title_date.setdefault(title_date, event)
 
-        fresh_urls = {
-            self._canonical_source_url(str(event.source_url))
+        fresh_keys = {
+            (self._canonical_source_url(str(event.source_url)), event.id)
             for event in fresh_events
         }
         fresh_signatures = {
@@ -1219,17 +1249,30 @@ class CatalogService:
             for event in fresh_events
             if (signature := self._semantic_dedupe_key(event))
         }
+        fresh_title_dates = {
+            title_date
+            for event in fresh_events
+            if (title_date := self._title_date_key(event))
+        }
 
         matched_old_ids: set[int] = set()
         merged: list[Event] = []
 
         for event in fresh_events:
             source_url = self._canonical_source_url(str(event.source_url))
-            old = old_by_url.get(source_url) if source_url else None
+            old = (
+                old_by_url.get((source_url, event.id))
+                if source_url
+                else None
+            )
             if old is None:
                 signature = self._semantic_dedupe_key(event)
                 if signature:
                     old = old_by_signature.get(signature)
+            if old is None:
+                title_date = self._title_date_key(event)
+                if title_date:
+                    old = old_by_title_date.get(title_date)
             if old is not None:
                 matched_old_ids.add(id(old))
 
@@ -1252,9 +1295,10 @@ class CatalogService:
         for event in previous:
             source_url = self._canonical_source_url(str(event.source_url))
             signature = self._semantic_dedupe_key(event)
-            if source_url in fresh_urls or (
+            title_date = self._title_date_key(event)
+            if (source_url, event.id) in fresh_keys or (
                 signature is not None and signature in fresh_signatures
-            ):
+            ) or (title_date is not None and title_date in fresh_title_dates):
                 matched_old_ids.add(id(event))
                 continue
 
@@ -1506,15 +1550,16 @@ class CatalogService:
         return configs
 
     def _deduplicate(self, events: list[Event]) -> list[Event]:
-        unique_by_url: dict[str, Event] = {}
+        unique_by_key: dict[tuple[str, str], Event] = {}
         fallback_seen: set[str] = set()
         result: list[Event] = []
         for event in events:
             canonical_url = self._canonical_source_url(str(event.source_url))
             if canonical_url:
-                existing = unique_by_url.get(canonical_url)
+                key = (canonical_url, event.id)
+                existing = unique_by_key.get(key)
                 if existing is None or self._event_completeness_score(event) > self._event_completeness_score(existing):
-                    unique_by_url[canonical_url] = event
+                    unique_by_key[key] = event
                 continue
 
             key = f"{event.title}|{event.starts_at}|{event.source_url}"
@@ -1523,9 +1568,10 @@ class CatalogService:
             fallback_seen.add(key)
             result.append(event)
 
-        result.extend(unique_by_url.values())
+        result.extend(unique_by_key.values())
         result = self._deduplicate_by_signature(result)
         result = self._deduplicate_related(result)
+        result = self._deduplicate_same_source_near_dates(result)
         return sorted(
             result,
             key=lambda item: (
@@ -1595,6 +1641,76 @@ class CatalogService:
             return events
         return [event for event in events if id(event) not in removed]
 
+    def _deduplicate_same_source_near_dates(
+        self,
+        events: list[Event],
+        *,
+        source_name: str = "ФПР",
+        window_days: int = 3,
+    ) -> list[Event]:
+        """Collapse split table rows from the FPR calendar.
+
+        FPR publishes one competition as several rows (men/women, age groups,
+        adjacent date ranges). The rows get different stable ids, so the regular
+        URL/signature dedupe keeps them apart. Group by title, city and region,
+        then merge dates within a few days.
+        """
+
+        passthrough: list[Event] = []
+        buckets: dict[tuple[str, str, str], list[Event]] = {}
+
+        for event in events:
+            if event.source_name != source_name or not event.starts_at:
+                passthrough.append(event)
+                continue
+
+            title = self._normalize_title_for_dedupe(event.title)
+            if not title:
+                passthrough.append(event)
+                continue
+
+            key = (
+                title,
+                self._normalize_location_name(event.city) or "",
+                self._normalize_location_name(event.region) or "",
+            )
+            try:
+                current_date = datetime.fromisoformat(event.starts_at)
+            except ValueError:
+                passthrough.append(event)
+                continue
+
+            bucket = buckets.setdefault(key, [])
+            duplicate_index = None
+            for index, existing in enumerate(bucket):
+                if not existing.starts_at:
+                    continue
+                try:
+                    existing_date = datetime.fromisoformat(existing.starts_at)
+                except ValueError:
+                    continue
+                if abs((existing_date - current_date).total_seconds()) <= window_days * 86400:
+                    duplicate_index = index
+                    break
+
+            if duplicate_index is None:
+                bucket.append(event)
+                continue
+
+            existing = bucket[duplicate_index]
+            existing_date = datetime.fromisoformat(existing.starts_at)
+            if current_date < existing_date or (
+                current_date == existing_date
+                and self._event_completeness_score(event)
+                > self._event_completeness_score(existing)
+            ):
+                bucket[duplicate_index] = event
+
+        return [
+            *passthrough,
+            *(event for bucket in buckets.values() for event in bucket),
+        ]
+
     def _dedupe_scope_key(self, event: Event) -> tuple[str, str] | None:
         normalized_date = (
             event.starts_at or self._parse_date_text(event.date_text) or ""
@@ -1652,6 +1768,13 @@ class CatalogService:
         if match is None:
             return str(event_id)
         return f"{match.group('prefix')}-{match.group('stable')}"
+
+    def _title_date_key(self, event: Event) -> tuple[str, str, str] | None:
+        title = self._normalize_title_for_dedupe(event.title)
+        date = (event.starts_at or self._parse_date_text(event.date_text) or "")[:10]
+        if not title or not date or not event.source_name:
+            return None
+        return (event.source_name, title, date)
 
     def _semantic_dedupe_key(self, event: Event) -> tuple[str, str, str] | None:
         normalized_title = self._normalize_title_for_dedupe(event.title)
@@ -1739,6 +1862,22 @@ class CatalogService:
             return 0
         return self.SOURCE_PRIORITY.get(source_name, 1)
 
+    def _clean_public_source_url(self, source_url: str | None) -> str | None:
+        if not source_url:
+            return source_url
+        value = str(source_url).strip()
+        if not value:
+            return source_url
+        host = urlparse(value).netloc.lower()
+        if host in {
+            "fpr-info.ru",
+            "www.fpr-info.ru",
+            "russia-powerlifting.ru",
+            "www.russia-powerlifting.ru",
+        }:
+            value = re.sub(r"#event-\d+$", "", value)
+        return value
+
     def _canonical_source_url(self, source_url: str | None) -> str:
         if not source_url:
             return ""
@@ -1825,9 +1964,12 @@ class CatalogService:
                 # the same event change identity whenever a source reordered
                 # its listing. Keep only source + stable URL hash from now on.
                 "id": self._stabilize_event_id(event.id),
+                "source_url": self._clean_public_source_url(event.source_url),
                 "region": normalized_region,
                 "city": self._normalize_city(event.city, normalized_region),
-                "category": self._normalize_category(event.category),
+                "category": self._normalize_category(
+                    event.category, title=event.title
+                ),
                 "starts_at": self._normalize_starts_at(event.date_text, event.starts_at),
                 "series_slug": series_slug,
                 "series_name": series_name,
@@ -2423,12 +2565,27 @@ class CatalogService:
 
         return None
 
-    def _normalize_category(self, category: str | None) -> str | None:
+    def _normalize_category(
+        self, category: str | None, *, title: str | None = None
+    ) -> str | None:
+        """Map any source category to one of the public catalog sections.
+
+        Sources use very different labels ("Пауэрлифтинг", "ARDF, радиоспорт",
+        "Детские старты", "Фастпакинг"). The public UI exposes a short, stable
+        list of sections; everything without a matching section goes to
+        "Разное". The combined "Ориентирование и туризм" category is split by
+        title: tourism, hiking, climbing and Nordic walking go to "Разное".
+        """
+
         if not category:
             return None
 
-        normalized = category.strip().lower()
+        normalized = category.strip().casefold()
+        if not normalized:
+            return None
 
+        if "гто" in normalized or "вфск" in normalized:
+            return "ГТО"
         if any(
             token in normalized
             for token in [
@@ -2463,43 +2620,65 @@ class CatalogService:
             return "Триатлон"
         if any(token in normalized for token in ["вело", "велогон", "gravel", "bmx"]):
             return "Велоспорт"
+        if "скайсноу" in normalized:
+            return "Разное"
         if any(
             token in normalized
-            for token in ["бег", "trail", "трейл", "кросс", "полумарафон", "марафон", "экиден", "ekiden"]
+            for token in ["лыж", "ski", "биатлон", "snow"]
         ):
-            return "Бег"
-        if any(token in normalized for token in ["лыж", "ski", "биатлон"]):
             return "Лыжи"
-        if any(token in normalized for token in ["плав", "swim"]):
-            return "Плавание"
-        if any(token in normalized for token in ["водный спорт", "sup", "сап", "греб", "каяк", "байдар"]):
-            return "Плавание"
         if any(
             token in normalized
-            for token in ["ориентирование", "туризм", "скалолаз", "альпинизм", "rogaine", "рогейн"]
+            for token in [
+                "ходьба",
+                "nordic walking",
+                "спортивная ходьба",
+                "скандинав",
+            ]
         ):
-            return "Ориентирование и туризм"
-        if any(token in normalized for token in ["ходьба", "nordic walking", "спортивная ходьба"]):
-            return "Ходьба"
-        if any(token in normalized for token in ["борьба", "дзюдо"]):
-            return "Единоборства"
-        if any(token in normalized for token in ["легкая атлетика", "атлетик"]):
-            return "Легкая атлетика"
-        if any(token in normalized for token in ["гонки с препятствиями", "ocr", "ниндзя", "obstacle"]):
-            return "Другие"
-        if any(token in normalized for token in ["фестиваль", "лагерь", "тур", "перезагрузка"]):
-            return "Другие"
-        if "скайран" in normalized:
+            return "Разное"
+        if any(
+            token in normalized
+            for token in [
+                "бег",
+                "trail",
+                "трейл",
+                "кросс",
+                "полумарафон",
+                "марафон",
+                "экиден",
+                "ekiden",
+                "скайран",
+            ]
+        ):
             return "Бег"
         if any(
             token in normalized
-            for token in ["детский спорт", "самокат", "беговел", "подвижные игры"]
+            for token in [
+                "плав",
+                "swim",
+                "водный спорт",
+                "sup",
+                "сап",
+                "греб",
+                "каяк",
+                "байдар",
+            ]
         ):
-            return "Детские старты"
-        if normalized in {"другое", "другие"} or "другой вид" in normalized:
-            return "Другие"
+            return "Плавание"
+        if (
+            "ориентирование" in normalized
+            or "рогейн" in normalized
+            or "rogaine" in normalized
+        ):
+            title_text = (title or "").casefold()
+            if title and any(
+                marker in title_text for marker in TOURISM_TITLE_MARKERS
+            ):
+                return "Разное"
+            return "Ориентирование"
 
-        return category.strip()
+        return "Разное"
 
     def _apply_filters(self, events: list[Event], filters: EventFilters) -> list[Event]:
         filtered = events
@@ -2536,7 +2715,10 @@ class CatalogService:
 
         if filters.categories:
             selected_categories = {
-                category.lower() for category in filters.categories if category.strip()
+                normalized.lower()
+                for category in filters.categories
+                if category.strip()
+                and (normalized := self._normalize_category(category))
             }
             filtered = [
                 event

@@ -904,7 +904,8 @@ a {
   background: linear-gradient(90deg, rgba(176, 123, 255, 0.96), rgba(205, 172, 255, 0.72));
 }
 
-.event-card--ориентирование-и-туризм::before {
+.event-card--ориентирование-и-туризм::before,
+.event-card--ориентирование::before {
   background: linear-gradient(90deg, rgba(120, 183, 92, 0.96), rgba(164, 210, 127, 0.72));
 }
 
@@ -1140,7 +1141,9 @@ a {
 }
 
 .event-card__category--ориентирование-и-туризм,
-.category-chip--ориентирование-и-туризм {
+.event-card__category--ориентирование,
+.category-chip--ориентирование-и-туризм,
+.category-chip--ориентирование {
   color: #48603d;
 }
 
@@ -1166,9 +1169,16 @@ a {
 
 .event-card__category--другие,
 .event-card__category--легкая-атлетика,
+.event-card__category--разное,
 .category-chip--другие,
-.category-chip--легкая-атлетика {
+.category-chip--легкая-атлетика,
+.category-chip--разное {
   color: var(--accent-soft);
+}
+
+.event-card__category--гто,
+.category-chip--гто {
+  color: #5d5732;
 }
 
 .event-card h3 {
@@ -1211,8 +1221,17 @@ a {
   color: #5d35a1;
 }
 
-.event-card--ориентирование-и-туризм .event-card__date {
+.event-card--ориентирование-и-туризм .event-card__date,
+.event-card--ориентирование .event-card__date {
   color: #355f22;
+}
+
+.event-card--гто .event-card__date {
+  color: #6b5c1f;
+}
+
+.event-card--разное .event-card__date {
+  color: var(--accent);
 }
 
 .event-card--ходьба .event-card__date {

@@ -19,8 +19,9 @@ def make_event(
     event_id: str | None = None,
     title: str | None = None,
     city: str = "Москва",
-    region: str = "Москва",
+    region: str | None = "Москва",
     source_url: str | None = None,
+    starts_at: str = "2026-11-01T00:00:00",
 ) -> Event:
     return Event(
         id=event_id or f"{source}-{index}",
@@ -28,7 +29,7 @@ def make_event(
         city=city,
         region=region,
         category="Бег",
-        starts_at="2026-11-01T00:00:00",
+        starts_at=starts_at,
         date_text="01.11.2026",
         source_name=source,
         source_url=source_url or f"https://example.com/{source}/{index}",
@@ -203,6 +204,79 @@ class CatalogLifecycleTest(unittest.TestCase):
             title="Granfondo Волоколамск Дети",
             city="Волоколамск",
             region="Московская область",
+        )
+
+        deduped = self.service._deduplicate([first, second])
+
+        self.assertEqual(len(deduped), 2)
+
+    def test_synthetic_calendar_fragments_are_removed(self) -> None:
+        fpr = make_event(
+            1,
+            source="ФПР",
+            source_url="https://fpr-info.ru/kalendar.htm#event-123",
+        )
+        wrpf = make_event(
+            2,
+            source="СПР/WRPF",
+            source_url=(
+                "https://russia-powerlifting.ru/kalendar/"
+                "kalendar-sorevnovanij-2026#event-456"
+            ),
+        )
+
+        self.assertEqual(
+            str(self.service._normalize_event(fpr).source_url),
+            "https://fpr-info.ru/kalendar.htm",
+        )
+        self.assertEqual(
+            str(self.service._normalize_event(wrpf).source_url),
+            "https://russia-powerlifting.ru/kalendar/kalendar-sorevnovanij-2026",
+        )
+
+    def test_fpr_rows_with_same_title_city_and_close_dates_are_merged(self) -> None:
+        first = make_event(
+            1,
+            source="ФПР",
+            event_id="fpr-1-aaaaaaaaaaaa",
+            title="Чемпионат Азии",
+            city="Улан-Батор, Монголия",
+            region=None,
+            source_url="https://fpr-info.ru/kalendar.htm#event-1",
+            starts_at="2026-11-30T00:00:00",
+        )
+        second = make_event(
+            2,
+            source="ФПР",
+            event_id="fpr-2-bbbbbbbbbbbb",
+            title="Чемпионат Азии",
+            city="Улан-Батор, Монголия",
+            region=None,
+            source_url="https://fpr-info.ru/kalendar.htm#event-2",
+            starts_at="2026-12-01T00:00:00",
+        )
+
+        deduped = self.service._deduplicate([first, second])
+
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(deduped[0].starts_at, "2026-11-30T00:00:00")
+
+    def test_fpr_same_title_on_distant_dates_is_kept(self) -> None:
+        first = make_event(
+            1,
+            source="ФПР",
+            title="Чемпионат Азии",
+            city="Улан-Батор, Монголия",
+            region=None,
+            starts_at="2026-11-30T00:00:00",
+        )
+        second = make_event(
+            2,
+            source="ФПР",
+            title="Чемпионат Азии",
+            city="Улан-Батор, Монголия",
+            region=None,
+            starts_at="2026-12-20T00:00:00",
         )
 
         deduped = self.service._deduplicate([first, second])
