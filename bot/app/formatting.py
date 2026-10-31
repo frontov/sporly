@@ -72,7 +72,7 @@ def pick_image(event: Event) -> str | None:
 def format_event_card(event: Event) -> str:
     """Compact card used as a photo caption or a standalone message."""
 
-    title = escape(clean_text(event.title, 120))
+    title = escape(clean_text(event.title))
     lines = [f"<b>{title}</b>", ""]
 
     meta: list[str] = []
@@ -112,7 +112,7 @@ def format_event_card(event: Event) -> str:
 
 
 def format_favorite_card(favorite: Favorite) -> str:
-    title = escape(clean_text(favorite.title, 120))
+    title = escape(clean_text(favorite.title))
     lines = [f"<b>{title}</b>", ""]
 
     meta: list[str] = []
@@ -131,7 +131,7 @@ def format_favorite_card(favorite: Favorite) -> str:
 
 
 def format_event(event: Event, index: int | None = None) -> str:
-    title = escape(clean_text(event.title, 160))
+    title = escape(clean_text(event.title))
     prefix = f"{index}. " if index is not None else ""
     lines = [f"<b>{prefix}{title}</b>"]
 
@@ -166,7 +166,7 @@ def format_favorite(
     bot_username: str = "",
     page: int = 1,
 ) -> str:
-    title = escape(clean_text(favorite.title, 120))
+    title = escape(clean_text(favorite.title))
     marker = (
         EVENT_COLORS[(index - 1) % len(EVENT_COLORS)] + " "
         if index is not None
@@ -223,7 +223,7 @@ def format_event_list(
 
     cards: list[str] = []
     for position, event in enumerate(events, start=1):
-        event_title = escape(clean_text(event.title, 80))
+        event_title = escape(clean_text(event.title))
         marker = EVENT_COLORS[(position - 1) % len(EVENT_COLORS)]
         heading = f"<b>{marker} {event_title}</b>"
 
@@ -266,7 +266,7 @@ def format_event_list(
 
 
 def format_event_details(event: Event, marker: str = "") -> str:
-    title = escape(clean_text(event.title, 180))
+    title = escape(clean_text(event.title))
     prefix = f"{marker} " if marker else ""
     lines = [f"<b>{prefix}{title}</b>", ""]
 
@@ -318,7 +318,7 @@ def format_event_details(event: Event, marker: str = "") -> str:
 
 
 def format_digest_event(event: Event, index: int) -> str:
-    title = escape(clean_text(event.title, 120))
+    title = escape(clean_text(event.title))
     when = format_date(event.starts_at, event.date_text, short=True)
     place = clean_text(event.location or event.venue, 45)
     meta = " · ".join(part for part in (when, place) if part)

@@ -1154,6 +1154,11 @@ a {
   color: #7a4252;
 }
 
+.event-card__category--силовые-виды,
+.category-chip--силовые-виды {
+  color: #6b4a20;
+}
+
 .event-card__category--детские-старты,
 .category-chip--детские-старты {
   color: #76506a;

@@ -20,12 +20,18 @@ from app.parsers.base import (
     CyclingRaceParser,
     CssDirectoryParser,
     CityTrailParser,
+    FbbrCalendarParser,
+    FprCalendarParser,
     GaltropaParser,
     GetRunParser,
     GoldenUltraParser,
     GranFondoParser,
     GravelSeriesParser,
     IronStarParser,
+    NapCalendarParser,
+    NbcEventsParser,
+    RfwfCalendarParser,
+    SpswProgramParser,
     BorisovoParser,
     LaStradaParser,
     MarzocchiCupParser,
@@ -47,6 +53,8 @@ from app.parsers.base import (
     SwimcupParser,
     SourceFieldMap,
     VelogearanceParser,
+    WpcCalendarParser,
+    WrpfCalendarParser,
     XCNewsParser,
 )
 from app.schemas.event import Event
@@ -211,6 +219,14 @@ class CatalogService:
             "La Strada",
             "City Trail",
             "Borisovo.cluB",
+            "НАП Россия",
+            "WPC/WPO",
+            "ФТАР",
+            "ФПР",
+            "СПР/WRPF",
+            "ФББР",
+            "NBC",
+            "Siberian Power Show",
         }
     )
     REGISTRATION_SOURCE_NAMES: frozenset[str] = frozenset(
@@ -1436,6 +1452,22 @@ class CatalogService:
             return BikeEventsParser(source_config)
         if source_config.parser_type == "gravel_series":
             return GravelSeriesParser(source_config)
+        if source_config.parser_type == "fpr_calendar":
+            return FprCalendarParser(source_config)
+        if source_config.parser_type == "rfwf_calendar":
+            return RfwfCalendarParser(source_config)
+        if source_config.parser_type == "nap_calendar":
+            return NapCalendarParser(source_config)
+        if source_config.parser_type == "wpc_calendar":
+            return WpcCalendarParser(source_config)
+        if source_config.parser_type == "wrpf_calendar":
+            return WrpfCalendarParser(source_config)
+        if source_config.parser_type == "fbbr_calendar":
+            return FbbrCalendarParser(source_config)
+        if source_config.parser_type == "nbc_events":
+            return NbcEventsParser(source_config)
+        if source_config.parser_type == "spsw_program":
+            return SpswProgramParser(source_config)
         return CssDirectoryParser(source_config)
 
     def _load_source_configs(self, config_path: Path) -> list[SourceConfig]:
@@ -2397,6 +2429,36 @@ class CatalogService:
 
         normalized = category.strip().lower()
 
+        if any(
+            token in normalized
+            for token in [
+                "силов",
+                "пауэрлифтинг",
+                "powerlifting",
+                "тяжелая атлетика",
+                "тяжёлая атлетика",
+                "weightlifting",
+                "бодибилдинг",
+                "bodybuilding",
+                "кроссфит",
+                "crossfit",
+                "гирев",
+                "kettlebell",
+                "стронгмен",
+                "strongman",
+                "армлифтинг",
+                "стритлифтинг",
+                "пауэрспорт",
+                "становая тяга",
+                "становой тяге",
+                "приседан",
+                "бицепс",
+                "логлифт",
+                "hip thrust",
+                "хип-траст",
+            ]
+        ) or re.search(r"\bжим\b", normalized):
+            return "Силовые виды"
         if any(token in normalized for token in ["триатлон", "дуатлон", "swimrun", "акватлон"]):
             return "Триатлон"
         if any(token in normalized for token in ["вело", "велогон", "gravel", "bmx"]):

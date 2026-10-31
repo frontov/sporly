@@ -446,6 +446,130 @@
         "title": "strong",
         "link": "a"
       }
+    },
+    {
+      "name": "ФПР",
+      "base_url": "https://fpr-info.ru",
+      "listing_urls": [
+        "https://fpr-info.ru/kalendar.htm"
+      ],
+      "enabled": true,
+      "parser_type": "fpr_calendar",
+      "selectors": {
+        "item": "table tr",
+        "title": "td:nth-of-type(4)",
+        "link": "a[href]"
+      }
+    },
+    {
+      "name": "ФТАР",
+      "base_url": "https://rfwf.ru",
+      "listing_urls": [
+        "https://rfwf.ru/competitions/calendar"
+      ],
+      "enabled": true,
+      "parser_type": "rfwf_calendar",
+      "selectors": {
+        "item": "article",
+        "title": "h1",
+        "link": "a[href]"
+      }
+    },
+    {
+      "name": "НАП Россия",
+      "base_url": "https://powerlifting-russia.ru",
+      "listing_urls": [
+        "https://powerlifting-russia.ru/calendar/"
+      ],
+      "enabled": true,
+      "parser_type": "nap_calendar",
+      "selectors": {
+        "item": "article.trow",
+        "title": ".trow__t a",
+        "link": ".trow__t a"
+      }
+    },
+    {
+      "name": "WPC/WPO",
+      "base_url": "http://www.wpc-wpo.ru",
+      "listing_urls": [
+        "http://www.wpc-wpo.ru/calendar/?y=2026",
+        "http://www.wpc-wpo.ru/calendar/?y=2027"
+      ],
+      "enabled": true,
+      "parser_type": "wpc_calendar",
+      "pagination_selector": "div.pagination a",
+      "max_pages": 10,
+      "selectors": {
+        "item": "div.artlist_item",
+        "title": ".artlist_title",
+        "link": "a.artlist_more",
+        "date": ".artlist_date"
+      }
+    },
+    {
+      "name": "СПР/WRPF",
+      "base_url": "https://russia-powerlifting.ru",
+      "listing_urls": [
+        "https://russia-powerlifting.ru/kalendar/kalendar-sorevnovanij-2026",
+        "https://russia-powerlifting.ru/kalendar/kalendar-sorevnovanij-2027"
+      ],
+      "enabled": true,
+      "parser_type": "wrpf_calendar",
+      "selectors": {
+        "item": "article.item-page ol > li > p",
+        "title": "p",
+        "link": "p"
+      }
+    },
+    {
+      "name": "ФББР",
+      "base_url": "https://fbbr.org",
+      "listing_urls": [
+        "https://fbbr.org/category/competitions/anons"
+      ],
+      "enabled": true,
+      "parser_type": "fbbr_calendar",
+      "pagination_selector": "a.next.page-numbers",
+      "max_pages": 3,
+      "selectors": {
+        "item": "article",
+        "title": ".entry-title a",
+        "link": ".entry-title a",
+        "image": "img"
+      }
+    },
+    {
+      "name": "NBC",
+      "base_url": "https://nbcpro.ru",
+      "listing_urls": [
+        "https://nbcpro.ru/events/"
+      ],
+      "enabled": true,
+      "parser_type": "nbc_events",
+      "selectors": {
+        "item": "div.event-block",
+        "title": ".event-description-left span a",
+        "link": ".event-description-left span a",
+        "date": ".event-description-left h3",
+        "city": ".event-location",
+        "image": ".event-image img"
+      }
+    },
+    {
+      "name": "Siberian Power Show",
+      "base_url": "https://spsw.ru",
+      "listing_urls": [
+        "https://spsw.ru/program"
+      ],
+      "enabled": true,
+      "parser_type": "spsw_program",
+      "selectors": {
+        "item": "h1",
+        "title": "h1",
+        "link": "a[href]",
+        "image": "meta[property='og:image']"
+      }
     }
   ]
 }

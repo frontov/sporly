@@ -379,6 +379,33 @@ def no_results_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def _pagination_row(
+    page: int, total_pages: int, callback_prefix: str
+) -> list[InlineKeyboardButton]:
+    row: list[InlineKeyboardButton] = []
+    if page > 0:
+        row.append(
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data=f"{callback_prefix}:{page - 1}",
+            )
+        )
+    row.append(
+        InlineKeyboardButton(
+            text=f"Стр. {page + 1} из {max(total_pages, 1)}",
+            callback_data="noop",
+        )
+    )
+    if page + 1 < total_pages:
+        row.append(
+            InlineKeyboardButton(
+                text="Ещё ➡️",
+                callback_data=f"{callback_prefix}:{page + 1}",
+            )
+        )
+    return row
+
+
 def category_keyboard(
     categories: list[str],
     selected: set[str],
@@ -405,18 +432,9 @@ def category_keyboard(
     if pair:
         rows.append(pair)
 
-    if len(categories) > per_page:
-        nav: list[InlineKeyboardButton] = []
-        if page > 0:
-            nav.append(
-                InlineKeyboardButton(text="‹", callback_data=f"flow:catpage:{page - 1}")
-            )
-        nav.append(InlineKeyboardButton(text=f"{page + 1}", callback_data="noop"))
-        if start + per_page < len(categories):
-            nav.append(
-                InlineKeyboardButton(text="›", callback_data=f"flow:catpage:{page + 1}")
-            )
-        rows.append(nav)
+    total_pages = (len(categories) + per_page - 1) // per_page
+    if total_pages > 1:
+        rows.append(_pagination_row(page, total_pages, "flow:catpage"))
 
     rows.append(
         [
@@ -459,18 +477,9 @@ def city_keyboard(
     if pair:
         rows.append(pair)
 
-    if len(cities) > per_page:
-        nav: list[InlineKeyboardButton] = []
-        if page > 0:
-            nav.append(
-                InlineKeyboardButton(text="‹", callback_data=f"flow:citypage:{page - 1}")
-            )
-        nav.append(InlineKeyboardButton(text=f"{page + 1}", callback_data="noop"))
-        if start + per_page < len(cities):
-            nav.append(
-                InlineKeyboardButton(text="›", callback_data=f"flow:citypage:{page + 1}")
-            )
-        rows.append(nav)
+    total_pages = (len(cities) + per_page - 1) // per_page
+    if total_pages > 1:
+        rows.append(_pagination_row(page, total_pages, "flow:citypage"))
 
     rows.append(
         [

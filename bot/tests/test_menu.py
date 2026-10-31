@@ -239,6 +239,28 @@ class NavigationLabelsTest(unittest.TestCase):
                 },
             )
 
+    def test_selection_pager_explains_pages(self) -> None:
+        options = [f"Вариант {index}" for index in range(25)]
+        for markup in (
+            category_keyboard(options, set(), page=0, per_page=10),
+            city_keyboard(options, set(), page=0, per_page=10),
+        ):
+            labels = [
+                button.text
+                for row in markup.inline_keyboard
+                for button in row
+            ]
+            self.assertIn("Стр. 1 из 3", labels)
+            self.assertIn("Ещё ➡️", labels)
+            self.assertNotIn("‹", labels)
+            self.assertNotIn("›", labels)
+
+        markup = category_keyboard(options, set(), page=1, per_page=10)
+        labels = [button.text for row in markup.inline_keyboard for button in row]
+        self.assertIn("⬅️ Назад", labels)
+        self.assertIn("Стр. 2 из 3", labels)
+        self.assertIn("Ещё ➡️", labels)
+
     def test_event_links_do_not_repeat_telegram_arrow(self) -> None:
         markup = single_event_keyboard(
             "token", "https://example.com/event", False, "sporly_bot"

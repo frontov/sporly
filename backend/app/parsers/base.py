@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
+import html as html_module
 import json
 import re
 from typing import Any
@@ -5846,3 +5847,750 @@ class GravelSeriesParser(CssDirectoryParser):
             if host not in self.SOCIAL_HOSTS:
                 return url
         return links[0] if links else None
+
+
+class StrengthCalendarParser(CssDirectoryParser):
+    """Shared helpers for powerlifting, weightlifting and fitness calendars."""
+
+    CATEGORY = "Силовые виды"
+    MONTHS_GENITIVE = {
+        "января": 1,
+        "февраля": 2,
+        "марта": 3,
+        "апреля": 4,
+        "мая": 5,
+        "июня": 6,
+        "июля": 7,
+        "августа": 8,
+        "сентября": 9,
+        "октября": 10,
+        "ноября": 11,
+        "декабря": 12,
+    }
+    MONTHS_SHORT = {
+        "янв": 1,
+        "фев": 2,
+        "мар": 3,
+        "апр": 4,
+        "май": 5,
+        "июн": 6,
+        "июл": 7,
+        "авг": 8,
+        "сен": 9,
+        "окт": 10,
+        "ноя": 11,
+        "дек": 12,
+    }
+
+    def _strength_event(
+        self,
+        *,
+        index: int,
+        title: str,
+        source_url: str,
+        starts_at: datetime | None,
+        city: str | None = None,
+        region: str | None = None,
+        description: str | None = None,
+        image_url: str | None = None,
+        venue: str | None = None,
+    ) -> Event:
+        stable_hash = hashlib.sha1(source_url.encode("utf-8")).hexdigest()[:12]
+        prefix = re.sub(r"\s+", "-", self.config.name.lower())
+        return Event(
+            id=f"{prefix}-{index}-{stable_hash}",
+            title=title,
+            description=description,
+            city=city,
+            region=region,
+            venue=venue,
+            category=self.CATEGORY,
+            date_text=(
+                starts_at.strftime("%d.%m.%Y") if starts_at is not None else None
+            ),
+            starts_at=starts_at.isoformat() if starts_at is not None else None,
+            source_name=self.config.name,
+            source_url=source_url,
+            image_url=image_url,
+        )
+
+    def _strength_location(
+        self, value: str | None
+    ) -> tuple[str | None, str | None]:
+        if not value:
+            return None, None
+        cleaned = re.sub(r"\s+", " ", value.replace("\xa0", " ")).strip(" ,;")
+        cleaned = re.sub(r"^(?:г\.|город)\s*", "", cleaned, flags=re.IGNORECASE)
+        parts = [part.strip(" .") for part in cleaned.split(",") if part.strip(" .")]
+        if not parts:
+            return None, None
+        if len(parts) == 1:
+            return parts[0], None
+        return parts[0], parts[1]
+
+    def _split_nbc_location(
+        self, value: str | None
+    ) -> tuple[str | None, str | None, str | None]:
+        if not value:
+            return None, None, None
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        if not parts:
+            return None, None, None
+        city = re.sub(r"^(?:г\.|город)\s*", "", parts[0]).strip() or None
+        remainder = ", ".join(parts[1:]).strip() or None
+        return city, None, remainder
+
+    def _safe_year(self, value: str | int) -> int:
+        year = int(value)
+        return year + 2000 if year < 100 else year
+
+    def _strength_fragment(self, *parts: object) -> str:
+        key = "|".join(str(part or "") for part in parts)
+        return str(int(hashlib.sha1(key.encode("utf-8")).hexdigest()[:12], 16))
+
+    def _find_numeric_date(
+        self, text: str, default_year: int | None = None
+    ) -> tuple[datetime, int, int] | None:
+        patterns = (
+            (
+                r"(?<!\d)(\d{1,2})\.(\d{1,2})\s*[–—-]\s*\d{1,2}\.(\d{1,2})\.(\d{2,4})",
+                "cross",
+            ),
+            (
+                r"(?<!\d)(\d{1,2})\s*[–—-]\s*\d{1,2}\.(\d{1,2})\.(\d{2,4})",
+                "range",
+            ),
+            (r"(?<!\d)(\d{1,2})\.(\d{1,2})\.(\d{2,4})", "single"),
+        )
+        for pattern, kind in patterns:
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            day = int(match.group(1))
+            if kind == "cross":
+                month = int(match.group(2))
+                year = self._safe_year(match.group(4))
+            elif kind == "range":
+                month = int(match.group(2))
+                year = self._safe_year(match.group(3))
+            else:
+                month = int(match.group(2))
+                year = self._safe_year(match.group(3))
+            try:
+                return datetime(year, month, day), match.start(), match.end()
+            except ValueError:
+                continue
+
+        if default_year is not None:
+            without_year = re.search(
+                r"(?<!\d)(\d{1,2})\.(\d{1,2})(?![\d.])", text
+            )
+            if without_year:
+                day = int(without_year.group(1))
+                month = int(without_year.group(2))
+                try:
+                    return (
+                        datetime(default_year, month, day),
+                        without_year.start(),
+                        without_year.end(),
+                    )
+                except ValueError:
+                    return None
+        return None
+
+    def _find_russian_date(
+        self, text: str, default_year: int | None = None
+    ) -> datetime | None:
+        normalized = " ".join(text.lower().replace("ё", "е").split())
+        cross_month = re.search(
+            r"(?<!\d)(\d{1,2})\s+([а-я]+)\s*[–—-]\s*\d{1,2}\s+[а-я]+",
+            normalized,
+        )
+        if cross_month:
+            day = int(cross_month.group(1))
+            month = self.MONTHS_GENITIVE.get(cross_month.group(2))
+            if month:
+                return self._build_strength_datetime(
+                    default_year or datetime.now().year, month, day
+                )
+        same_month = re.search(
+            r"(?<!\d)(\d{1,2})(?:\s*[–—-]\s*\d{1,2})?\s+([а-я]+)",
+            normalized,
+        )
+        if same_month:
+            day = int(same_month.group(1))
+            month = self.MONTHS_GENITIVE.get(same_month.group(2))
+            if month is None:
+                month = self.MONTHS_SHORT.get(same_month.group(2)[:3])
+            if month:
+                return self._build_strength_datetime(
+                    default_year or datetime.now().year, month, day
+                )
+        return None
+
+    def _build_strength_datetime(
+        self, year: int, month: int, day: int
+    ) -> datetime | None:
+        try:
+            return datetime(year, month, day)
+        except ValueError:
+            return None
+
+    def _clean_strength_title(self, value: str) -> str:
+        title = re.sub(r"\s+", " ", value.replace("\xa0", " ")).strip(" -–—.,")
+        return re.sub(
+            r"^(?:Положение|Анонс|Информационный бюллетень)\s*:\s*",
+            "",
+            title,
+            flags=re.IGNORECASE,
+        )
+
+
+class FprCalendarParser(StrengthCalendarParser):
+    """Calendar of the Russian Powerlifting Federation (fpr-info.ru)."""
+
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        events: list[Event] = []
+        for listing_url in self.config.listing_urls:
+            try:
+                response = await client.get(listing_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+            events.extend(self.parse(self._decode(response.content), str(response.url)))
+        return events
+
+    def _decode(self, content: bytes) -> str:
+        for encoding in ("utf-8", "cp1251"):
+            try:
+                decoded = content.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            if "календар" in decoded.lower() or "соревнован" in decoded.lower():
+                return decoded
+        return content.decode("cp1251", errors="ignore")
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        table = next(
+            (
+                candidate
+                for candidate in soup.find_all("table")
+                if len(candidate.find_all("tr")) >= 5
+                and re.search(
+                    r"\b20\d{2}\b", candidate.get_text(" ", strip=True)[:250]
+                )
+            ),
+            None,
+        )
+        if table is None:
+            return []
+
+        heading = table.get_text(" ", strip=True)[:250]
+        year_match = re.search(r"\b(20\d{2})\b", heading)
+        year = int(year_match.group(1)) if year_match else datetime.now().year
+
+        events: list[Event] = []
+        for index, row in enumerate(table.find_all("tr")):
+            cells = row.find_all(["td", "th"])
+            if len(cells) < 9:
+                continue
+            title = re.sub(
+                r"\s+", " ", cells[3].get_text(" ", strip=True)
+            ).strip()
+            date_text = re.sub(
+                r"\s+", " ", cells[6].get_text(" ", strip=True)
+            ).strip()
+            if not title or title.lower().startswith(
+                ("наименование", "i полугодие", "ii полугодие")
+            ):
+                continue
+            if "конференц" in title.lower() or "семинар" in title.lower():
+                continue
+            starts_at = self._find_russian_date(date_text, year)
+            if starts_at is None:
+                continue
+            city = (
+                re.sub(r"\s+", " ", cells[7].get_text(" ", strip=True)).strip()
+                if len(cells) >= 10
+                else ""
+            )
+            source_url = (
+                f"{page_url}#event-"
+                f"{self._strength_fragment(page_url, title, starts_at.isoformat())}"
+            )
+            events.append(
+                self._strength_event(
+                    index=index,
+                    title=title,
+                    source_url=source_url,
+                    starts_at=starts_at,
+                    city=city or None,
+                    description=re.sub(
+                        r"\s+", " ", cells[5].get_text(" ", strip=True)
+                    ).strip()
+                    or None,
+                )
+            )
+        return events
+
+
+class RfwfCalendarParser(StrengthCalendarParser):
+    """Weightlifting calendar embedded as JSON in rfwf.ru."""
+
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        events: list[Event] = []
+        seen_urls: set[str] = set()
+        for listing_url in self.config.listing_urls:
+            try:
+                response = await client.get(listing_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+            for event in self.parse(response.text, str(response.url)):
+                if str(event.source_url) in seen_urls:
+                    continue
+                seen_urls.add(str(event.source_url))
+                events.append(event)
+        return events
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        unescaped = html_module.unescape(html)
+        items: list[dict[str, Any]] = []
+        decoder = json.JSONDecoder()
+        for match in re.finditer(
+            r'\[\{\s*"id"\s*:\s*\d+\s*,\s*"name"\s*:', unescaped
+        ):
+            try:
+                payload, _ = decoder.raw_decode(unescaped[match.start():])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, list):
+                items.extend(item for item in payload if isinstance(item, dict))
+
+        events: list[Event] = []
+        seen_urls: set[str] = set()
+        for item in items:
+            title = str(item.get("name") or "").strip()
+            raw_url = str(item.get("url") or "").strip()
+            if not title or not raw_url or item.get("cancelled"):
+                continue
+            source_url = urljoin(page_url, raw_url)
+            if source_url in seen_urls:
+                continue
+            seen_urls.add(source_url)
+            starts_at = None
+            try:
+                timestamp = int(item.get("dateFrom") or 0)
+            except (TypeError, ValueError):
+                timestamp = 0
+            if timestamp:
+                starts_at = datetime.fromtimestamp(
+                    timestamp, tz=timezone.utc
+                ).replace(tzinfo=None)
+            city, region = self._strength_location(
+                str(item.get("country") or "")
+            )
+            description_parts = [
+                str(item.get("event") or "").strip(),
+                str(item.get("category") or "").strip(),
+            ]
+            events.append(
+                self._strength_event(
+                    index=len(events),
+                    title=title,
+                    source_url=source_url,
+                    starts_at=starts_at,
+                    city=city,
+                    region=region,
+                    description=" • ".join(part for part in description_parts if part)
+                    or None,
+                )
+            )
+        return events
+
+
+class NapCalendarParser(StrengthCalendarParser):
+    """NAP Russia tournament calendar (powerlifting-russia.ru/calendar)."""
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+        for section in soup.select("section.cal__m"):
+            month_value = str(section.get("data-m") or "")
+            month_match = re.match(r"(\d{4})-(\d{2})", month_value)
+            if not month_match:
+                continue
+            year, month = int(month_match.group(1)), int(month_match.group(2))
+            for card in section.select("article.trow"):
+                title_link = card.select_one(".trow__t a")
+                if title_link is None:
+                    continue
+                title = title_link.get_text(" ", strip=True)
+                href = title_link.get("href")
+                if not title or not isinstance(href, str):
+                    continue
+                day_text = card.select_one(".dt b")
+                day_match = re.search(r"\d{1,2}", day_text.get_text(strip=True)) if day_text else None
+                if day_match is None:
+                    continue
+                starts_at = self._build_strength_datetime(
+                    year, month, int(day_match.group())
+                )
+                if starts_at is None:
+                    continue
+                location_text = (
+                    card.select_one(".trow__w").get_text(" ", strip=True)
+                    if card.select_one(".trow__w")
+                    else None
+                )
+                city, region = self._strength_location(location_text)
+                image = card.select_one("img.trow__pic")
+                image_url = (
+                    urljoin(page_url, image.get("src"))
+                    if image is not None and isinstance(image.get("src"), str)
+                    else None
+                )
+                events.append(
+                    self._strength_event(
+                        index=len(events),
+                        title=title,
+                        source_url=urljoin(page_url, href),
+                        starts_at=starts_at,
+                        city=city,
+                        region=region,
+                        image_url=image_url,
+                    )
+                )
+        return events
+
+
+class WpcCalendarParser(StrengthCalendarParser):
+    """WPC/WPO event calendar."""
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+        for card in soup.select("div.artlist_item"):
+            date_node = card.select_one(".artlist_date")
+            title_node = card.select_one(".artlist_title")
+            link_node = card.select_one("a.artlist_more")
+            if date_node is None or title_node is None or link_node is None:
+                continue
+            title = title_node.get_text(" ", strip=True)
+            href = link_node.get("href")
+            if not title or not isinstance(href, str):
+                continue
+            date_match = self._find_numeric_date(
+                date_node.get_text(" ", strip=True)
+            )
+            starts_at = date_match[0] if date_match else None
+            content_node = card.select_one(".artlist_content")
+            events.append(
+                self._strength_event(
+                    index=len(events),
+                    title=title,
+                    source_url=urljoin(page_url, href),
+                    starts_at=starts_at,
+                    description=(
+                        content_node.get_text(" ", strip=True)
+                        if content_node is not None
+                        else None
+                    ),
+                )
+            )
+        return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_wpc_event(event, client, semaphore))
+            for event in events
+        ]
+        return await asyncio.gather(*tasks)
+
+    async def _enrich_wpc_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+        soup = BeautifulSoup(response.text, "html.parser")
+        lines = [
+            line.strip()
+            for line in soup.get_text("\n", strip=True).splitlines()
+            if line.strip()
+        ]
+        location = None
+        for index, line in enumerate(lines):
+            if line.startswith("Место проведения"):
+                if line.rstrip().endswith(":") and index + 1 < len(lines):
+                    location = lines[index + 1]
+                else:
+                    location = line.split(":", 1)[-1].strip() or None
+                break
+        city, region = self._strength_location(location)
+        if city is None and region is None:
+            return event
+        return event.model_copy(update={"city": city, "region": region})
+
+
+class WrpfCalendarParser(StrengthCalendarParser):
+    """СПР/WRPF calendar published on russia-powerlifting.ru."""
+
+    async def fetch_events(
+        self, client: httpx.AsyncClient
+    ) -> list[Event] | None:
+        events: list[Event] = []
+        seen_urls: set[str] = set()
+        for listing_url in self.config.listing_urls:
+            try:
+                response = await client.get(listing_url)
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+            for event in self.parse(response.text, str(response.url)):
+                if str(event.source_url) in seen_urls:
+                    continue
+                seen_urls.add(str(event.source_url))
+                events.append(event)
+        return events
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        container = soup.select_one("article.item-page") or soup
+        events: list[Event] = []
+        for paragraph in container.select("ol > li > p"):
+            text = re.sub(
+                r"\s+", " ", paragraph.get_text(" ", strip=True)
+            ).strip()
+            if not text:
+                continue
+            date_match = self._find_numeric_date(
+                text, default_year=datetime.now().year
+            )
+            if date_match is None:
+                continue
+            starts_at, date_start, _ = date_match
+            prefix = text[:date_start].strip(" ,")
+            prefix = re.sub(r"\s*\(присвоение[^)]*\)\s*$", "", prefix).strip(" ,")
+            chunks = [chunk.strip() for chunk in prefix.split(",") if chunk.strip()]
+            if not chunks:
+                continue
+            location_index = next(
+                (
+                    index
+                    for index in range(len(chunks) - 1, -1, -1)
+                    if "/" in chunks[index]
+                ),
+                None,
+            )
+            if location_index is None:
+                location_index = max(len(chunks) - 2, 0)
+            title = ", ".join(chunks[:location_index]).strip()
+            location_chunks = chunks[location_index:]
+            if not title or not location_chunks:
+                continue
+            if len(location_chunks) == 1:
+                location_value = location_chunks[0]
+                if "/" in location_value:
+                    _, _, tail = location_value.partition("/")
+                    city, region = tail.strip() or None, None
+                else:
+                    city, region = self._strength_location(location_value)
+            else:
+                _, _, region_hint = location_chunks[0].partition("/")
+                city = location_chunks[-1]
+                region = (
+                    location_chunks[-2]
+                    if len(location_chunks) >= 3
+                    else (region_hint.strip() or None)
+                )
+            source_url = (
+                f"{page_url}#event-"
+                f"{self._strength_fragment(page_url, title, starts_at.isoformat(), city, region)}"
+            )
+            events.append(
+                self._strength_event(
+                    index=len(events),
+                    title=title,
+                    source_url=source_url,
+                    starts_at=starts_at,
+                    city=city,
+                    region=region,
+                )
+            )
+        return events
+
+
+class FbbrCalendarParser(StrengthCalendarParser):
+    """Bodybuilding and fitness announcements of FBBR."""
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+        for article in soup.select("article"):
+            title_link = article.select_one(".entry-title a")
+            if title_link is None:
+                continue
+            title = self._clean_strength_title(
+                title_link.get_text(" ", strip=True)
+            )
+            href = title_link.get("href")
+            if not title or not isinstance(href, str):
+                continue
+            excerpt_node = article.select_one(".entry-content")
+            excerpt = (
+                excerpt_node.get_text(" ", strip=True)
+                if excerpt_node is not None
+                else ""
+            )
+            date_match = self._find_numeric_date(
+                f"{title} {excerpt}", default_year=datetime.now().year
+            )
+            starts_at = date_match[0] if date_match else None
+            if starts_at is None:
+                continue
+            image = article.select_one("img")
+            image_url = (
+                urljoin(page_url, image.get("src"))
+                if image is not None and isinstance(image.get("src"), str)
+                else None
+            )
+            events.append(
+                self._strength_event(
+                    index=len(events),
+                    title=title,
+                    source_url=urljoin(page_url, href),
+                    starts_at=starts_at,
+                    description=re.sub(r"\s+", " ", excerpt).strip() or None,
+                    image_url=image_url,
+                )
+            )
+        return events
+
+
+class NbcEventsParser(StrengthCalendarParser):
+    """National Bodybuilding Community events."""
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        events: list[Event] = []
+        for card in soup.select("div.event-block"):
+            title_link = card.select_one(".event-description-left span a")
+            if title_link is None:
+                continue
+            title = title_link.get_text(" ", strip=True)
+            href = title_link.get("href")
+            if not title or not isinstance(href, str):
+                continue
+            date_node = card.select_one(".event-description-left h3")
+            starts_at = (
+                self._find_russian_date(
+                    date_node.get_text(" ", strip=True),
+                    default_year=datetime.now().year,
+                )
+                if date_node is not None
+                else None
+            )
+            location_node = card.select_one(".event-location")
+            location = (
+                location_node.get_text(" ", strip=True)
+                if location_node is not None
+                else None
+            )
+            city, region, venue = self._split_nbc_location(location)
+            image = card.select_one(".event-image img")
+            image_url = (
+                urljoin(page_url, image.get("src"))
+                if image is not None and isinstance(image.get("src"), str)
+                else None
+            )
+            events.append(
+                self._strength_event(
+                    index=len(events),
+                    title=title,
+                    source_url=urljoin(page_url, href),
+                    starts_at=starts_at,
+                    city=city,
+                    region=region,
+                    venue=venue,
+                    image_url=image_url,
+                )
+            )
+        return events
+
+
+class SpswProgramParser(StrengthCalendarParser):
+    """Siberian Power Show programme page (one festival per year)."""
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        heading = soup.select_one("h1")
+        title_text = (
+            re.sub(r"\s+", " ", heading.get_text(" ", strip=True)).strip()
+            if heading is not None
+            else ""
+        )
+        if not title_text:
+            return []
+        year_match = re.search(r"\b(20\d{2})\b", title_text)
+        if year_match is None:
+            return []
+        year = int(year_match.group(1))
+        title = re.sub(
+            r"^Программа\s+", "", title_text, flags=re.IGNORECASE
+        ).strip()
+
+        dates: list[datetime] = []
+        venues: list[str] = []
+        for block in soup.select(".t056"):
+            name_node = block.select_one(".t056__title")
+            descr_node = block.select_one(".t056__descr")
+            if descr_node is not None:
+                starts_at = self._find_russian_date(
+                    descr_node.get_text(" ", strip=True), year
+                )
+                if starts_at is not None:
+                    dates.append(starts_at)
+            if name_node is not None:
+                name = re.sub(
+                    r"\s+", " ", name_node.get_text(" ", strip=True)
+                ).strip()
+                if name and name not in venues:
+                    venues.append(name)
+        if not dates:
+            return []
+
+        image = soup.select_one('meta[property="og:image"]')
+        image_url = (
+            image.get("content")
+            if image is not None and isinstance(image.get("content"), str)
+            else None
+        )
+        source_url = f"{page_url}#event-{year}"
+        return [
+            self._strength_event(
+                index=0,
+                title=title,
+                source_url=source_url,
+                starts_at=min(dates),
+                city="Красноярск",
+                region="Красноярский край",
+                venue=", ".join(venues) or None,
+                description="Фестиваль спорта и силовых видов",
+                image_url=image_url,
+            )
+        ]

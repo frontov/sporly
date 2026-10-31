@@ -60,6 +60,34 @@ class FormattingTest(unittest.TestCase):
         self.assertNotIn("https://example.com/event", text)
         self.assertIn("🔴 Старт", text)
 
+    def test_event_list_keeps_full_titles(self) -> None:
+        title = (
+            "Международный профессиональный турнир «WRPF Pro III» "
+            "по пауэрлифтингу, силовому двоеборью, жиму лежа и становой тяге"
+        )
+        events = [Event(id="1", title=title, source_name="Сайт")]
+
+        text = format_event_list(
+            events, total=1, page=1, total_pages=1, page_size=4
+        )
+
+        self.assertIn(title, text)
+        self.assertNotIn("…", text)
+
+    def test_event_details_keep_full_title(self) -> None:
+        title = "Чемпионат России по пауэрлифтингу среди мужчин и женщин " * 4
+        event = Event(
+            id="1",
+            title=title,
+            source_name="Сайт",
+            source_url="https://example.com",
+        )
+
+        text = format_event_details(event)
+
+        self.assertIn(title.strip(), text)
+        self.assertNotIn("…", text)
+
     def test_event_card_fits_photo_caption(self) -> None:
         event = Event(
             id="1",
