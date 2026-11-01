@@ -27,6 +27,7 @@ from app.flows import (
     show_single_event,
     show_subscription,
     start_nearest,
+    start_recommended,
     start_search,
     toggle_favorite_by_token,
 )
@@ -59,6 +60,7 @@ HOME_TEXT = (
     "<b>Куда нажать</b>\n"
     "🔍 <b>Найти старт</b> — поиск по названию, городу или виду спорта\n"
     "🔥 <b>Ближайшие</b> — старты по вашим интересам\n"
+    "✨ <b>Рекомендуемые</b> — подборка стартов от Sporly\n"
     "🎯 <b>Мои интересы</b> — виды спорта, регионы и уведомления\n"
     "⭐ <b>Избранное</b> — сохранённые старты и напоминания\n"
     "⚙️ <b>Ещё</b> — уведомления, приглашения, реклама и сайт\n\n"
@@ -85,6 +87,7 @@ MORE_TEXT = (
     "🌐 <b>Сайт</b> — полный каталог с календарём и фильтрами.\n\n"
     "🔔 <b>Уведомления</b> — отдельно настройте новые старты по фильтрам,\n"
     "дайджест и напоминания об избранном.\n\n"
+    "✨ <b>Рекомендуемые</b> — подборка стартов от Sporly.\n\n"
     "🎯 <b>Мои интересы</b> и ⭐ <b>Избранное</b> — всегда под рукой\n"
     "в этом меню.\n\n"
     f"{HINT_HELP}"
@@ -105,7 +108,10 @@ HELP_TEXT = (
     "<b>4. Подпишитесь на новые</b>\n"
     "«🎯 Мои интересы» — выберите виды спорта и регионы. «🔥 Ближайшие»\n"
     "показывает только их, а бот присылает новые старты и ежедневный дайджест.\n\n"
-    "<b>5. Настройте уведомления</b>\n"
+    "<b>5. Смотрите рекомендуемые</b>\n"
+    "«✨ Рекомендуемые» — подборка стартов, которые мы советуем посмотреть.\n"
+    "Она обновляется на сервере и всегда доступна с главного экрана.\n\n"
+    "<b>6. Настройте уведомления</b>\n"
     "«⚙️ Ещё» → «🔔 Уведомления» — три независимые настройки:\n"
     "🔔 новые старты по сохранённым фильтрам — раз в день;\n"
     "📬 дайджест ближайших стартов — раз в день утром;\n"
@@ -114,6 +120,7 @@ HELP_TEXT = (
     "<b>Команды</b>\n"
     "/find — поиск\n"
     "/soon — ближайшие\n"
+    "/recommended — рекомендуемые старты\n"
     "/subscribe — мои интересы\n"
     "/notifications — настройки уведомлений\n"
     "/survey — настроить интересы заново\n"
@@ -374,6 +381,18 @@ async def cmd_help(message: Message, bot: Bot, bot_username: str = "") -> None:
     await send_help(bot, message.from_user.id)
 
 
+@router.message(Command("recommended", "rec"))
+async def cmd_recommended(
+    message: Message, bot: Bot, bot_username: str = ""
+) -> None:
+    if message.from_user is None:
+        return
+    await database.touch_user(message.from_user.id)
+    await start_recommended(
+        bot, message.from_user.id, bot_username=bot_username
+    )
+
+
 @router.message(Command("survey"))
 async def cmd_survey(
     message: Message,
@@ -427,6 +446,8 @@ async def _handle_menu_action(
         await send_find_hub(bot, chat_id)
     elif action == "soon":
         await start_nearest(bot, chat_id, bot_username=bot_username)
+    elif action == "rec":
+        await start_recommended(bot, chat_id, bot_username=bot_username)
     elif action == "all":
         await start_search(bot, chat_id, bot_username=bot_username)
     elif action == "sub":

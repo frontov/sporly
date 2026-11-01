@@ -9,6 +9,7 @@ from app.keyboards import (
     BUTTON_FIND,
     BUTTON_HOME,
     BUTTON_OPEN,
+    BUTTON_RECOMMENDED,
     BUTTON_SHARE,
     category_keyboard,
     city_keyboard,
@@ -32,8 +33,86 @@ from app.storage import Subscription
 class MenuTextTest(unittest.TestCase):
     def test_new_buttons(self) -> None:
         self.assertEqual(menu_callback_for_text(BUTTON_FIND), "menu:find")
+        self.assertEqual(
+            menu_callback_for_text(BUTTON_RECOMMENDED), "menu:rec"
+        )
+        self.assertEqual(menu_callback_for_text("Рекомендуемые"), "menu:rec")
         self.assertEqual(menu_callback_for_text("🎯 Мои интересы"), "menu:sub")
         self.assertEqual(menu_callback_for_text("⚙️ Ещё"), "menu:more")
+
+    def test_recommended_button_is_on_the_home_screen(self) -> None:
+        for markup in (
+            home_keyboard(),
+            more_keyboard("sporly_bot", 1, "https://sporly.ru"),
+        ):
+            labels = [
+                button.text
+                for row in markup.inline_keyboard
+                for button in row
+            ]
+            callbacks = {
+                button.callback_data
+                for row in markup.inline_keyboard
+                for button in row
+            }
+            self.assertIn(BUTTON_RECOMMENDED, labels)
+            self.assertIn("menu:rec", callbacks)
+
+    def test_non_admins_do_not_see_admin_actions(self) -> None:
+        markups = [
+            home_keyboard(),
+            more_keyboard("sporly_bot", 1, "https://sporly.ru"),
+            single_event_keyboard("token", None, False, "sporly_bot"),
+            event_detail_keyboard(
+                token="token",
+                source_url=None,
+                is_favorite=False,
+                share_url_value=None,
+                back_callback="back:s:session:1",
+            ),
+        ]
+        for markup in markups:
+            callbacks = {
+                button.callback_data
+                for row in markup.inline_keyboard
+                for button in row
+                if button.callback_data
+            }
+            self.assertFalse(
+                any(callback.startswith("admin:") for callback in callbacks),
+                callbacks,
+            )
+
+    def test_admin_card_has_recommend_action(self) -> None:
+        markup = single_event_keyboard(
+            "token",
+            None,
+            False,
+            "sporly_bot",
+            admin_event_token="token",
+        )
+        callbacks = {
+            button.callback_data
+            for row in markup.inline_keyboard
+            for button in row
+        }
+        self.assertIn("admin:rec:token", callbacks)
+
+        featured = event_detail_keyboard(
+            token="token",
+            source_url=None,
+            is_favorite=False,
+            share_url_value=None,
+            back_callback="back:s:session:1",
+            admin_event_token="token",
+            is_featured=True,
+        )
+        labels = [
+            button.text
+            for row in featured.inline_keyboard
+            for button in row
+        ]
+        self.assertIn("✅ В рекомендуемых", labels)
 
     def test_legacy_buttons(self) -> None:
         self.assertEqual(menu_callback_for_text("🔍 Найти события"), "menu:find")

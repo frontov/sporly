@@ -32,6 +32,22 @@ class FormattingTest(unittest.TestCase):
         self.assertIn("1 июня 2027", text)
         self.assertIn("https://example.com/?a=1&amp;b=2", text)
 
+    def test_featured_events_are_marked(self) -> None:
+        event = Event(
+            id="1",
+            title="Рекомендуемый старт",
+            source_name="Сайт",
+            is_featured=True,
+            featured_label="Выбор редакции",
+        )
+        text = format_event_list(
+            [event], total=1, page=1, total_pages=1
+        )
+        self.assertIn("✨ Рекомендуемый старт", text)
+
+        details = format_event_details(event)
+        self.assertIn("Выбор редакции", details)
+
     def test_event_list_uses_colored_markers(self) -> None:
         events = [
             Event(id=str(index), title=f"Старт {index}", source_name="Сайт")

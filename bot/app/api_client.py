@@ -58,6 +58,9 @@ class Event(BaseModel):
     source_name: str | None = None
     source_url: str | None = None
     image_url: str | None = None
+    is_featured: bool = False
+    featured_label: str | None = None
+    featured_priority: int = 0
 
     @property
     def location(self) -> str:
@@ -95,14 +98,16 @@ class EventQuery:
     page: int = 1
     page_size: int = 4
     sort_by: str = "date_asc"
+    featured: bool = False
 
     def params(self) -> list[tuple[str, str]]:
         params: list[tuple[str, str]] = [
             ("page", str(self.page)),
             ("page_size", str(self.page_size)),
-            ("sort_by", self.sort_by),
         ]
-        if self.query:
+        if not self.featured:
+            params.append(("sort_by", self.sort_by))
+        if self.query and not self.featured:
             params.append(("q", self.query))
         for city in self.cities:
             params.append(("city", city))
@@ -110,12 +115,13 @@ class EventQuery:
             params.append(("category", category))
         if self.date_from:
             params.append(("date_from", self.date_from))
-        if self.first_seen_after:
+        if self.first_seen_after and not self.featured:
             params.append(("first_seen_after", self.first_seen_after))
         return params
 
     def cache_key(self) -> str:
-        return repr(self.params())
+        prefix = "featured:" if self.featured else ""
+        return prefix + repr(self.params())
 
 
 class ApiClient:
@@ -138,7 +144,8 @@ class ApiClient:
         if cached is not None and cached[0] > now:
             return cached[1]
 
-        response = await self._client.get("/api/events", params=query.params())
+        path = "/api/events/featured" if query.featured else "/api/events"
+        response = await self._client.get(path, params=query.params())
         response.raise_for_status()
         page = EventsPage.model_validate(response.json())
         self._cache[key] = (now + settings.api_cache_ttl_seconds, page)
@@ -175,6 +182,57 @@ class ApiClient:
         )
         self._options = (now + settings.filter_cache_ttl_seconds, cities, categories)
         return cities, categories
+
+    def _admin_headers(self) -> dict[str, str]:
+        if not settings.admin_token:
+            raise RuntimeError("ADMIN_TOKEN is not configured")
+        return {"X-Admin-Token": settings.admin_token}
+
+    async def admin_featured(self) -> list[dict[str, Any]]:
+        response = await self._client.get(
+            "/api/admin/featured", headers=self._admin_headers()
+        )
+        response.raise_for_status()
+        payload = response.json()
+        items = payload.get("items") if isinstance(payload, dict) else None
+        return [item for item in items or [] if isinstance(item, dict)]
+
+    async def admin_feature_event(
+        self,
+        event_id: str | None = None,
+        *,
+        source_url: str | None = None,
+        label: str = "Рекомендовано Sporly",
+        priority: int = 100,
+        until: str | None = None,
+    ) -> dict[str, Any]:
+        response = await self._client.post(
+            "/api/admin/featured",
+            headers=self._admin_headers(),
+            json={
+                "event_id": event_id,
+                "source_url": source_url,
+                "label": label,
+                "priority": priority,
+                "until": until,
+                "enabled": True,
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        self.clear_cache()
+        return payload
+
+    async def admin_unfeature_event(self, entry_id: str) -> bool:
+        response = await self._client.delete(
+            f"/api/admin/featured/{entry_id}",
+            headers=self._admin_headers(),
+        )
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        self.clear_cache()
+        return True
 
     async def health(self) -> dict[str, Any]:
         response = await self._client.get("/api/health")

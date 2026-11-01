@@ -17,6 +17,7 @@ from aiogram.types import (
 from app.api_client import api_client
 from app.config import settings
 from app.context import database, partner_registry
+from app.formatting import clean_text
 from app.keyboards import BUTTON_HOME
 
 
@@ -71,9 +72,114 @@ def _stats_keyboard(days: int) -> InlineKeyboardMarkup:
                     text=f"📅 {other} дней", callback_data=f"admin:stats:{other}"
                 ),
             ],
+            [
+                InlineKeyboardButton(
+                    text="✨ Рекомендуемые", callback_data="admin:featured"
+                )
+            ],
             [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")],
         ]
     )
+
+
+def _featured_status(entry: dict) -> str:
+    if not entry.get("enabled", True):
+        return "⏸ выключено"
+    until = str(entry.get("until") or "").strip()
+    if until and until[:10] < datetime.now(MOSCOW_TZ).date().isoformat():
+        return "⌛ истекло"
+    return "✅ активно"
+
+
+def _featured_meta(entry: dict) -> str:
+    parts: list[str] = []
+    when = _short_time(entry.get("starts_at"))
+    if when != "—":
+        parts.append(f"📅 {when}")
+    place = ", ".join(
+        part
+        for part in (
+            str(entry.get("city") or "").strip(),
+            str(entry.get("region") or "").strip(),
+        )
+        if part
+    )
+    if place:
+        parts.append(f"📍 {escape(place)}")
+    if entry.get("until"):
+        parts.append(f"до {escape(str(entry['until'])[:10])}")
+    if entry.get("priority") not in (None, 100):
+        parts.append(f"приоритет {entry['priority']}")
+    return " · ".join(parts)
+
+
+async def _featured_screen() -> tuple[str, InlineKeyboardMarkup]:
+    footer = [
+        InlineKeyboardButton(
+            text="⬅️ Статистика", callback_data="admin:stats:7"
+        ),
+        InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home"),
+    ]
+    try:
+        items = await api_client.admin_featured()
+    except Exception as error:
+        return (
+            "<b>✨ Рекомендуемые</b>\n\n"
+            "Не удалось загрузить список с сервера.\n"
+            f"Ошибка: <code>{escape(type(error).__name__)}</code>\n\n"
+            "Проверьте, что у бота и backend совпадает <code>ADMIN_TOKEN</code>.",
+            InlineKeyboardMarkup(inline_keyboard=[footer]),
+        )
+
+    lines = [f"<b>✨ Рекомендуемые</b> · {len(items)}", ""]
+    rows: list[list[InlineKeyboardButton]] = []
+    if not items:
+        lines.extend(
+            [
+                "Пока пусто.",
+                "",
+                "Как добавить: найдите старт через поиск, откройте карточку "
+                "и нажмите «⭐ В рекомендуемые».",
+                "",
+                "Можно и командой:",
+                "<code>/featured ID</code> или "
+                "<code>/featured https://…</code>",
+            ]
+        )
+    else:
+        for entry in items[:20]:
+            title = escape(
+                clean_text(str(entry.get("title") or "Без названия"), 120)
+            )
+            lines.append(f"{_featured_status(entry)} <b>{title}</b>")
+            meta = _featured_meta(entry)
+            if meta:
+                lines.append(meta)
+            entry_id = str(entry.get("id") or "")
+            if entry_id:
+                button_title = clean_text(
+                    str(entry.get("title") or entry_id), 50
+                )
+                rows.append(
+                    [
+                        InlineKeyboardButton(
+                            text=f"🗑 {button_title}",
+                            callback_data=f"admin:featured:del:{entry_id}",
+                        )
+                    ]
+                )
+        if len(items) > 20:
+            lines.append(f"…и ещё {len(items) - 20}")
+        lines.extend(
+            [
+                "",
+                "Добавить: откройте карточку старта и нажмите "
+                "«⭐ В рекомендуемые».",
+            ]
+        )
+
+    rows.append(footer)
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _overview_text(overview: dict, days: int) -> str:
@@ -275,6 +381,7 @@ async def cmd_admin(message: Message) -> None:
         "<b>Админка Sporly</b>\n\n"
         "/status — состояние backend и каталога\n"
         "/stats — воронка и источники трафика\n"
+        "/featured — управление рекомендуемыми\n"
         "/partners — показы и переходы по партнёрам\n"
         "/reload — сбросить кэш API и перечитать партнёров\n"
         "/broadcast &lt;текст&gt; — рассылка всем пользователям\n\n"
@@ -299,7 +406,8 @@ async def admin_callbacks(
         if len(parts) > 2 and parts[2].isdigit():
             days = int(parts[2])
 
-    await callback.answer()
+    if action not in {"rec", "featured"}:
+        await callback.answer()
 
     if action == "stats":
         await _send_callback_screen(
@@ -373,6 +481,116 @@ async def admin_callbacks(
                 ]
             ),
         )
+    elif action == "featured":
+        if len(parts) > 3 and parts[2] == "del":
+            entry_id = parts[3]
+            try:
+                deleted = await api_client.admin_unfeature_event(entry_id)
+            except Exception:
+                await callback.answer(
+                    "Не удалось удалить. Проверьте ADMIN_TOKEN.",
+                    show_alert=True,
+                )
+                return
+            await callback.answer(
+                "Удалено из рекомендуемых" if deleted else "Уже удалено"
+            )
+        else:
+            await callback.answer()
+        text, markup = await _featured_screen()
+        await _send_callback_screen(callback, bot, text, markup)
+    elif action == "rec":
+        if len(parts) < 3:
+            await callback.answer()
+            return
+        token = parts[2]
+        payload = await database.get_event_by_token(token)
+        event_id = (
+            str(payload.get("event_id") or payload.get("id") or "").strip()
+            if payload
+            else ""
+        )
+        if not event_id:
+            await callback.answer(
+                "Карточка устарела, откройте старт заново",
+                show_alert=True,
+            )
+            return
+        try:
+            await api_client.admin_feature_event(event_id)
+        except Exception:
+            await callback.answer(
+                "Не удалось добавить. Проверьте ADMIN_TOKEN.",
+                show_alert=True,
+            )
+            return
+        await callback.answer("⭐ Добавлено в рекомендуемые")
+        if callback.message is not None:
+            markup = _mark_featured_button(
+                callback.message.reply_markup, token
+            )
+            if markup is not None:
+                try:
+                    await callback.message.edit_reply_markup(
+                        reply_markup=markup
+                    )
+                except Exception:
+                    pass
+
+
+def _mark_featured_button(
+    markup: InlineKeyboardMarkup | None, token: str
+) -> InlineKeyboardMarkup | None:
+    if markup is None:
+        return None
+    for row in markup.inline_keyboard:
+        for button in row:
+            if button.callback_data == f"admin:rec:{token}":
+                button.text = "✅ В рекомендуемых"
+                button.callback_data = "admin:featured"
+    return markup
+
+
+@router.message(Command("featured"))
+async def cmd_featured(
+    message: Message, command: CommandObject
+) -> None:
+    if not _is_admin(message.from_user.id if message.from_user else None):
+        return
+    argument = (command.args or "").strip()
+    if not argument:
+        text, markup = await _featured_screen()
+        await message.answer(text, reply_markup=markup)
+        return
+
+    source_url = (
+        argument if argument.startswith(("http://", "https://")) else None
+    )
+    event_id = None if source_url else argument
+    try:
+        payload = await api_client.admin_feature_event(
+            event_id, source_url=source_url
+        )
+    except Exception as error:
+        await message.answer(
+            "Не удалось добавить старт в рекомендуемые.\n"
+            f"Ошибка: <code>{escape(type(error).__name__)}</code>\n\n"
+            "Проверьте ID или ссылку и что <code>ADMIN_TOKEN</code> "
+            "совпадает у бота и backend."
+        )
+        return
+
+    event = payload.get("event") if isinstance(payload, dict) else None
+    title = (
+        str(event.get("title") or "").strip()
+        if isinstance(event, dict)
+        else ""
+    )
+    lines = ["⭐ <b>Добавлено в рекомендуемые</b>"]
+    if title:
+        lines.append(escape(title))
+    lines.extend(["", "Список и удаление: /featured"])
+    await message.answer("\n".join(lines))
 
 
 @router.message(Command("status"))

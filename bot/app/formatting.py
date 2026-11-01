@@ -74,6 +74,10 @@ def format_event_card(event: Event) -> str:
 
     title = escape(clean_text(event.title))
     lines = [f"<b>{title}</b>", ""]
+    if event.is_featured:
+        lines.append(
+            f"✨ {escape(event.featured_label or 'Рекомендуем Sporly')}"
+        )
 
     meta: list[str] = []
     if event.category:
@@ -224,7 +228,11 @@ def format_event_list(
     cards: list[str] = []
     for position, event in enumerate(events, start=1):
         event_title = escape(clean_text(event.title))
-        marker = EVENT_COLORS[(position - 1) % len(EVENT_COLORS)]
+        marker = (
+            "✨"
+            if event.is_featured
+            else EVENT_COLORS[(position - 1) % len(EVENT_COLORS)]
+        )
         heading = f"<b>{marker} {event_title}</b>"
 
         when = format_date(event.starts_at, event.date_text, short=True)
@@ -269,6 +277,10 @@ def format_event_details(event: Event, marker: str = "") -> str:
     title = escape(clean_text(event.title))
     prefix = f"{marker} " if marker else ""
     lines = [f"<b>{prefix}{title}</b>", ""]
+    if event.is_featured:
+        lines.append(
+            f"✨ {escape(event.featured_label or 'Рекомендуем Sporly')}"
+        )
 
     facts: list[str] = []
     if event.category:

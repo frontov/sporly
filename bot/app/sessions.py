@@ -23,6 +23,7 @@ class SearchSession:
     # proactive messages such as the daily new-events digest.
     events: list[Event] | None = None
     title: str = "Ближайшие старты"
+    featured: bool = False
 
     @property
     def filters_selected(self) -> bool:
@@ -43,6 +44,7 @@ class SearchSessionStore:
         categories: list[str] | None = None,
         events: list[Event] | None = None,
         title: str = "Ближайшие старты",
+        featured: bool = False,
     ) -> SearchSession:
         self._prune()
         session = SearchSession(
@@ -54,6 +56,7 @@ class SearchSessionStore:
             created_at=time.time(),
             events=list(events) if events is not None else None,
             title=title,
+            featured=featured,
         )
         self._items[session.id] = session
         return session

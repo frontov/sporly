@@ -282,6 +282,8 @@ async def _favorite_ids(chat_id: int) -> set[str]:
 
 
 def _session_summary(session: SearchSession) -> str:
+    if session.featured:
+        return "✨ Подборка Sporly"
     summary = filters_summary(session.cities, session.categories)
     if session.query:
         summary = f"🔎 «{escape(clean_text(session.query, 50))}» · {summary}"
@@ -327,6 +329,7 @@ async def render_search_page(
                     page=max(page, 1),
                     page_size=PAGE_SIZE,
                     sort_by="date_asc",
+                    featured=session.featured,
                 )
             )
         except Exception as error:
@@ -364,6 +367,33 @@ async def render_search_page(
     if not result.items:
         if silent:
             return None
+        if session.featured:
+            return await _edit_screen(
+                bot,
+                chat_id,
+                message,
+                text=(
+                    "<b>✨ Рекомендуемые</b>\n\n"
+                    "Сейчас в подборке нет предстоящих стартов.\n\n"
+                    "💡 Загляните в «🔥 Ближайшие» — там все актуальные "
+                    "события по вашим интересам."
+                ),
+                markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text=BUTTON_SHOW_SOON,
+                                callback_data="menu:soon",
+                            )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text=BUTTON_HOME, callback_data="menu:home"
+                            )
+                        ],
+                    ]
+                ),
+            )
         return await _edit_screen(
             bot,
             chat_id,
@@ -485,6 +515,27 @@ async def start_nearest(
     )
 
 
+async def start_recommended(
+    bot: Bot,
+    chat_id: int,
+    *,
+    bot_username: str = "",
+) -> Message | None:
+    session = search_sessions.create(
+        chat_id,
+        title="✨ Рекомендуемые",
+        featured=True,
+    )
+    return await render_search_page(
+        bot,
+        chat_id,
+        session,
+        page=1,
+        bot_username=bot_username,
+        notify=True,
+    )
+
+
 async def move_search(
     bot: Bot,
     chat_id: int,
@@ -559,6 +610,8 @@ async def show_event_detail(
             ),
         )
 
+    from app.config import settings
+
     event = event_from_payload(payload)
     await database.remember_events([event.ref_payload()])
     is_favorite = await database.is_favorite(chat_id, event.id)
@@ -575,6 +628,8 @@ async def show_event_detail(
         share_url_value=share_url(bot_username, token, event.title),
         back_callback=back_callback,
         back_text=back_text,
+        admin_event_token=token if chat_id in settings.admin_ids else None,
+        is_featured=event.is_featured,
     )
     return await _edit_screen(
         bot, chat_id, message, text=text, markup=markup
@@ -1047,6 +1102,8 @@ async def show_single_event(
             ),
         )
 
+    from app.config import settings
+
     event = event_from_payload(payload)
     await database.remember_events([event.ref_payload()])
     is_favorite = await database.is_favorite(chat_id, event.id)
@@ -1060,6 +1117,8 @@ async def show_single_event(
         bot_username,
         event.title,
         back_callback=back_callback,
+        admin_event_token=token if chat_id in settings.admin_ids else None,
+        is_featured=event.is_featured,
     )
     return await _edit_screen(
         bot,

@@ -11,6 +11,7 @@ from app.text import EVENT_COLORS
 
 BUTTON_FIND = "🔍 Найти старт"
 BUTTON_SOON = "🔥 Ближайшие"
+BUTTON_RECOMMENDED = "✨ Рекомендуемые"
 BUTTON_INTERESTS = "🎯 Мои интересы"
 BUTTON_FAVORITES = "⭐ Избранное"
 BUTTON_MORE = "⚙️ Ещё"
@@ -28,6 +29,7 @@ BUTTON_FAVORITED = "✅ В избранном"
 MENU_TEXTS = {
     BUTTON_FIND: "menu:find",
     BUTTON_SOON: "menu:soon",
+    BUTTON_RECOMMENDED: "menu:rec",
     BUTTON_FAVORITES: "menu:fav",
     BUTTON_INTERESTS: "menu:sub",
     BUTTON_MORE: "menu:more",
@@ -46,6 +48,10 @@ LEGACY_MENU_ALIASES = {
     "ближайшие": "menu:soon",
     "ближайшие старты": "menu:soon",
     "скоро": "menu:soon",
+    "рекомендуемые": "menu:rec",
+    "рекомендованное": "menu:rec",
+    "рекомендации": "menu:rec",
+    "подборка": "menu:rec",
     "избранное": "menu:fav",
     "избранные": "menu:fav",
     "мои избранные": "menu:fav",
@@ -95,6 +101,22 @@ def _favorite_button(token: str, is_favorite: bool) -> InlineKeyboardButton:
     )
 
 
+def _admin_featured_row(
+    token: str, is_featured: bool
+) -> list[InlineKeyboardButton]:
+    if is_featured:
+        return [
+            InlineKeyboardButton(
+                text="✅ В рекомендуемых", callback_data="admin:featured"
+            )
+        ]
+    return [
+        InlineKeyboardButton(
+            text="⭐ В рекомендуемые", callback_data=f"admin:rec:{token}"
+        )
+    ]
+
+
 def _event_action_row(
     source_url: str | None, share_url_value: str | None
 ) -> list[InlineKeyboardButton]:
@@ -118,6 +140,7 @@ def home_keyboard(*, is_admin: bool = False) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub"),
                 InlineKeyboardButton(text=BUTTON_FAVORITES, callback_data="menu:fav"),
             ],
+            [InlineKeyboardButton(text=BUTTON_RECOMMENDED, callback_data="menu:rec")],
             [InlineKeyboardButton(text=BUTTON_MORE, callback_data="menu:more")],
             [InlineKeyboardButton(text=BUTTON_HELP, callback_data="menu:help")],
         ]
@@ -210,8 +233,13 @@ def more_keyboard(
     )
     rows.append(
         [
-            InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub"),
+            InlineKeyboardButton(text=BUTTON_RECOMMENDED, callback_data="menu:rec"),
             InlineKeyboardButton(text=BUTTON_FAVORITES, callback_data="menu:fav"),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub"),
         ]
     )
     rows.append(
@@ -315,10 +343,16 @@ def event_detail_keyboard(
     share_url_value: str | None,
     back_callback: str,
     back_text: str = "⬅️ К списку",
+    admin_event_token: str | None = None,
+    is_featured: bool = False,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [_favorite_button(token, is_favorite)]
     ]
+    if admin_event_token:
+        rows.append(
+            _admin_featured_row(admin_event_token, is_featured)
+        )
     actions = _event_action_row(source_url, share_url_value)
     if actions:
         rows.append(actions)
@@ -338,10 +372,16 @@ def single_event_keyboard(
     bot_username: str,
     title: str | None = None,
     back_callback: str | None = None,
+    admin_event_token: str | None = None,
+    is_featured: bool = False,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
         [_favorite_button(token, is_favorite)]
     ]
+    if admin_event_token:
+        rows.append(
+            _admin_featured_row(admin_event_token, is_featured)
+        )
     actions = _event_action_row(
         source_url, share_url(bot_username, token, title)
     )
