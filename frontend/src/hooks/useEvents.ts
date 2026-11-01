@@ -13,7 +13,6 @@ const buildQuery = (filters: FiltersState, page: number) => {
   if (filters.featured) params.set("featured", "true");
   if (filters.registrationStatus) params.set("registration_status", filters.registrationStatus);
   if (filters.kidsOnly) params.set("kids_only", "true");
-  if (filters.surfaceType) params.set("surface_type", filters.surfaceType);
   if (filters.difficultyLevel) params.set("difficulty_level", filters.difficultyLevel);
   if (effectiveDateFrom) params.set("date_from", effectiveDateFrom);
   if (filters.dateTo) params.set("date_to", filters.dateTo);

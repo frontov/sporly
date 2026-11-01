@@ -42,8 +42,6 @@ def event_facts(event: Event) -> list[str]:
     facts: list[str] = []
     if event.distance_summary:
         facts.append(clean_text(event.distance_summary, 80))
-    if event.surface_type:
-        facts.append(clean_text(event.surface_type, 40))
     if event.price_from:
         facts.append(clean_text(event.price_from, 40))
     if event.registration_deadline:
@@ -84,8 +82,6 @@ def format_event_card(event: Event) -> str:
         meta.append(clean_text(event.category, 40))
     if event.distance_summary:
         meta.append(clean_text(event.distance_summary, 50))
-    if event.surface_type:
-        meta.append(clean_text(event.surface_type, 30))
     if meta:
         lines.append("🏁 " + escape(" · ".join(meta)))
 
@@ -287,8 +283,6 @@ def format_event_details(event: Event, marker: str = "") -> str:
         facts.append(clean_text(event.category, 40))
     if event.distance_summary:
         facts.append(clean_text(event.distance_summary, 80))
-    if event.surface_type:
-        facts.append(clean_text(event.surface_type, 40))
     if facts:
         lines.append("🏁 " + escape(" · ".join(facts)))
 

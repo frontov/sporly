@@ -18,16 +18,6 @@ const REGISTRATION_OPTIONS = [
   { value: "limited", label: "Лист ожидания" }
 ];
 
-const SURFACE_OPTIONS = [
-  "Асфальт",
-  "Грунт / трейл",
-  "Грейвел",
-  "Открытая вода",
-  "Роллерная трасса",
-  "Снежная трасса",
-  "Городская трасса"
-];
-
 const DIFFICULTY_OPTIONS = [
   "Подойдёт новичкам",
   "Средняя сложность",
@@ -59,7 +49,6 @@ export const FiltersPanel = ({
       ? `Регистрация: ${REGISTRATION_OPTIONS.find((option) => option.value === filters.registrationStatus)?.label ?? filters.registrationStatus}`
       : "",
     filters.kidsOnly ? "Детские категории" : "",
-    filters.surfaceType ? filters.surfaceType : "",
     filters.difficultyLevel ? filters.difficultyLevel : "",
     filters.q ? `Поиск: ${filters.q}` : "",
     filters.dateFrom ? `От ${filters.dateFrom}` : "",
@@ -86,7 +75,6 @@ export const FiltersPanel = ({
       filters.showDetails ||
       Boolean(filters.registrationStatus) ||
       filters.kidsOnly ||
-      Boolean(filters.surfaceType) ||
       Boolean(filters.difficultyLevel)
     ) {
       setIsExperimentalOpen(true);
@@ -95,7 +83,6 @@ export const FiltersPanel = ({
     filters.showDetails,
     filters.registrationStatus,
     filters.kidsOnly,
-    filters.surfaceType,
     filters.difficultyLevel
   ]);
 
@@ -352,7 +339,6 @@ export const FiltersPanel = ({
               normalizedCategories.length > 0 ||
               filters.registrationStatus ||
               filters.kidsOnly ||
-              filters.surfaceType ||
               filters.difficultyLevel) ? (
               <div className="filters__cluster filters__cluster--selected">
                 <span className="filters__subhead">Выбрано</span>
@@ -389,20 +375,6 @@ export const FiltersPanel = ({
                       }
                     >
                       {REGISTRATION_OPTIONS.find((option) => option.value === filters.registrationStatus)?.label ?? filters.registrationStatus} ×
-                    </button>
-                  ) : null}
-                  {filters.surfaceType ? (
-                    <button
-                      type="button"
-                      className="selected-chip"
-                      onClick={() =>
-                        onChange({
-                          ...filters,
-                          surfaceType: ""
-                        })
-                      }
-                    >
-                      {filters.surfaceType} ×
                     </button>
                   ) : null}
                   {filters.difficultyLevel ? (
@@ -457,18 +429,6 @@ export const FiltersPanel = ({
                   {REGISTRATION_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field field--compact">
-                <span>Трасса</span>
-                <select value={filters.surfaceType} onChange={updateField("surfaceType")}>
-                  <option value="">Любой тип</option>
-                  {SURFACE_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
                     </option>
                   ))}
                 </select>

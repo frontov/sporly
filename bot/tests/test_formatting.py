@@ -120,6 +120,23 @@ class FormattingTest(unittest.TestCase):
         text = format_event_card(event)
         self.assertLessEqual(len(text), 1024)
 
+    def test_experimental_tags_are_hidden(self) -> None:
+        event = Event(
+            id="1",
+            title="Старт",
+            description="Описание",
+            surface_type="Снежная трасса",
+            participation_format="Командный",
+            source_name="Сайт",
+            source_url="https://example.com",
+        )
+        for text in (
+            format_event_card(event),
+            format_event_details(event),
+        ):
+            self.assertNotIn("Снежная трасса", text)
+            self.assertNotIn("Командный", text)
+
     def test_event_details_explain_buttons(self) -> None:
         event = Event(
             id="1",

@@ -85,8 +85,6 @@ const buildDecisionFacts = (event: EventItem) => {
   const facts: string[] = [];
   if (event.distance_summary) facts.push(event.distance_summary);
   if (event.registration_deadline) facts.push(event.registration_deadline);
-  if (event.surface_type) facts.push(event.surface_type);
-  if (event.participation_format) facts.push(event.participation_format);
   return facts.slice(0, 3);
 };
 

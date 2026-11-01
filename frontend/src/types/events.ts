@@ -81,7 +81,6 @@ export type FiltersState = {
   showDetails: boolean;
   registrationStatus: string;
   kidsOnly: boolean;
-  surfaceType: string;
   difficultyLevel: string;
   dateFrom: string;
   dateTo: string;
