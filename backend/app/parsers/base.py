@@ -1637,6 +1637,301 @@ class RussialoppetParser(CssDirectoryParser):
         return None
 
 
+class GryadkaCampsParser(CssDirectoryParser):
+    """Tilda landing page with a small block of curated training camps."""
+
+    CAMP_MARKERS = ("кэмп", "сбор", "вкатка")
+    LINK_OVERRIDES = {
+        # The site still links the Altai camp card to the old /murmansk27 URL.
+        "/murmansk27": "/altai27",
+    }
+    LOCATIONS = {
+        "/vkatka": (
+            "Ханты-Мансийск",
+            "Ханты-Мансийский автономный округ",
+        ),
+        "/newyear27": ("Верхошижмье", "Кировская область"),
+        "/karelia27": ("Петрозаводск", "Республика Карелия"),
+        "/altai27": ("Тюнгур", "Республика Алтай"),
+    }
+    MONTHS = {
+        "января": 1,
+        "февраля": 2,
+        "марта": 3,
+        "апреля": 4,
+        "мая": 5,
+        "июня": 6,
+        "июля": 7,
+        "августа": 8,
+        "сентября": 9,
+        "октября": 10,
+        "ноября": 11,
+        "декабря": 12,
+    }
+    MONTH_NAMES = (
+        "",
+        "января",
+        "февраля",
+        "марта",
+        "апреля",
+        "мая",
+        "июня",
+        "июля",
+        "августа",
+        "сентября",
+        "октября",
+        "ноября",
+        "декабря",
+    )
+
+    def parse(self, html: str, page_url: str) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        block = self._find_camps_block(soup)
+        if block is None:
+            return []
+
+        events: list[Event] = []
+        for index, card in enumerate(block.select(".t774__col")):
+            link_element = card.select_one(".t-card__title a")
+            if link_element is None:
+                continue
+
+            title = link_element.get_text(" ", strip=True)
+            href = link_element.get("href")
+            if not title or not isinstance(href, str) or not href.strip():
+                continue
+            if not any(marker in title.casefold() for marker in self.CAMP_MARKERS):
+                continue
+
+            full_link = urljoin(page_url, href)
+            path = urlparse(full_link).path
+            path = self.LINK_OVERRIDES.get(path, path)
+            full_link = urljoin(page_url, path)
+
+            description = self._extract_optional_text(
+                card, ".t-card__descr"
+            )
+            image_url = self._extract_optional_attr(
+                card, "meta[itemprop='image']", "content"
+            )
+            starts_at, date_text = self._parse_camp_dates(description)
+            city, region = self.LOCATIONS.get(path, (None, None))
+            category = self._category_for(title, description)
+            stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
+
+            events.append(
+                Event(
+                    id=f"gryadka-{index}-{stable_hash}",
+                    title=title,
+                    description=description,
+                    city=city,
+                    region=region,
+                    category=category,
+                    date_text=date_text,
+                    starts_at=starts_at,
+                    source_name=self.config.name,
+                    source_url=full_link,
+                    image_url=urljoin(page_url, image_url) if image_url else None,
+                )
+            )
+
+        return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        enriched: list[Event] = []
+        for event in events:
+            try:
+                response = await client.get(
+                    str(event.source_url),
+                    headers={
+                        "Accept": (
+                            "text/html,application/xhtml+xml,"
+                            "application/xml;q=0.9,*/*;q=0.8"
+                        ),
+                        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+                        "Referer": f"{self.config.base_url.rstrip('/')}/",
+                    },
+                )
+                response.raise_for_status()
+            except httpx.HTTPError:
+                enriched.append(event)
+                continue
+
+            soup = BeautifulSoup(response.text, "html.parser")
+            paragraphs = [
+                " ".join(element.get_text(" ", strip=True).split())
+                for element in soup.select(".t-descr")
+            ]
+            paragraphs = [text for text in paragraphs if text]
+            first_text = re.split(
+                r"\s*осталось\s+", paragraphs[0], maxsplit=1, flags=re.IGNORECASE
+            )[0] if paragraphs else None
+            starts_at, date_text = self._parse_camp_dates(first_text)
+            description = self._detail_description(paragraphs)
+            city, region = self.LOCATIONS.get(
+                urlparse(str(event.source_url)).path,
+                (event.city, event.region),
+            )
+            update: dict[str, Any] = {}
+            if starts_at:
+                update["starts_at"] = starts_at
+            if date_text:
+                update["date_text"] = date_text
+            if description:
+                update["description"] = description
+            if city:
+                update["city"] = city
+            if region:
+                update["region"] = region
+            enriched.append(
+                event.model_copy(update=update) if update else event
+            )
+        return enriched
+
+    def _find_camps_block(self, soup: BeautifulSoup) -> Any | None:
+        for block in soup.select(".t774"):
+            header = block.select_one(".t-section__descr, .t-section__title")
+            if header and "кэмпы от gryadka.club" in header.get_text(
+                " ", strip=True
+            ).casefold():
+                return block
+        return None
+
+    def _category_for(self, title: str, description: str | None) -> str:
+        haystack = f"{title} {description or ''}".casefold()
+        if "лыж" in haystack or "снег" in haystack:
+            return "Лыжи"
+        if "трейл" in haystack or "бег" in haystack:
+            return "Бег"
+        return "Разное"
+
+    def _detail_description(self, paragraphs: list[str]) -> str | None:
+        for text in paragraphs[1:]:
+            if len(text) < 40:
+                continue
+            if re.match(r"^осталось\b", text, flags=re.IGNORECASE):
+                continue
+            return text[:900]
+        return None
+
+    def _parse_camp_dates(
+        self, raw_value: str | None
+    ) -> tuple[str | None, str | None]:
+        if not raw_value:
+            return None, None
+        text = re.sub(r"\s+", " ", raw_value.replace("\xa0", " ")).strip()
+
+        full_numeric = re.search(
+            r"(\d{1,2})[./](\d{1,2})[./](\d{4})\s*[-–—]\s*"
+            r"(\d{1,2})[./](\d{1,2})[./](\d{4})",
+            text,
+        )
+        if full_numeric:
+            start = datetime(
+                int(full_numeric.group(3)),
+                int(full_numeric.group(2)),
+                int(full_numeric.group(1)),
+            )
+            end = datetime(
+                int(full_numeric.group(6)),
+                int(full_numeric.group(5)),
+                int(full_numeric.group(4)),
+            )
+            return start.isoformat(), self._format_numeric_range(
+                full_numeric.group(1),
+                full_numeric.group(2),
+                full_numeric.group(3),
+                full_numeric.group(4),
+                full_numeric.group(5),
+                full_numeric.group(6),
+            )
+
+        short_numeric = re.search(
+            r"(\d{1,2})[./](\d{1,2})\s*[-–—]\s*"
+            r"(\d{1,2})[./](\d{1,2})[./](\d{4})",
+            text,
+        )
+        if short_numeric:
+            end_year = int(short_numeric.group(5))
+            start_month = int(short_numeric.group(2))
+            start_day = int(short_numeric.group(1))
+            end_month = int(short_numeric.group(4))
+            end_day = int(short_numeric.group(3))
+            start_year = end_year
+            if (start_month, start_day) > (end_month, end_day):
+                start_year -= 1
+            start = datetime(start_year, start_month, start_day)
+            return start.isoformat(), self._format_numeric_range(
+                short_numeric.group(1),
+                short_numeric.group(2),
+                str(start_year),
+                short_numeric.group(3),
+                short_numeric.group(4),
+                short_numeric.group(5),
+            )
+
+        russian_full = re.search(
+            r"(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|"
+            r"июля|августа|сентября|октября|ноября|декабря)"
+            r"\s*[-–—]\s*(\d{1,2})\s+"
+            r"(января|февраля|марта|апреля|мая|июня|июля|августа|"
+            r"сентября|октября|ноября|декабря)"
+            r"(?:,?\s+(\d{4}))?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if russian_full:
+            month_one = self.MONTHS[russian_full.group(2).lower()]
+            month_two = self.MONTHS[russian_full.group(4).lower()]
+            year = int(russian_full.group(5)) if russian_full.group(5) else datetime.now().year
+            start = datetime(year, month_one, int(russian_full.group(1)))
+            end = datetime(year, month_two, int(russian_full.group(3)))
+            if end < start and not russian_full.group(5):
+                end = end.replace(year=year + 1)
+            return start.isoformat(), (
+                f"{russian_full.group(1)} {self.MONTH_NAMES[month_one]} — "
+                f"{russian_full.group(3)} {self.MONTH_NAMES[month_two]} "
+                f"{end.year}"
+            )
+
+        russian_same_month = re.search(
+            r"(\d{1,2})\s*[-–—]\s*(\d{1,2})\s+"
+            r"(января|февраля|марта|апреля|мая|июня|июля|августа|"
+            r"сентября|октября|ноября|декабря)\s+(\d{4})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if russian_same_month:
+            month = self.MONTHS[russian_same_month.group(3).lower()]
+            year = int(russian_same_month.group(4))
+            start = datetime(year, month, int(russian_same_month.group(1)))
+            return start.isoformat(), (
+                f"{russian_same_month.group(1)}–{russian_same_month.group(2)} "
+                f"{self.MONTH_NAMES[month]} {year}"
+            )
+
+        starts_at = self._normalize_datetime(text)
+        if starts_at:
+            return starts_at, text
+        return None, None
+
+    def _format_numeric_range(
+        self,
+        start_day: str,
+        start_month: str,
+        start_year: str,
+        end_day: str,
+        end_month: str,
+        end_year: str,
+    ) -> str:
+        return (
+            f"{int(start_day):02d}.{int(start_month):02d}.{start_year} — "
+            f"{int(end_day):02d}.{int(end_month):02d}.{end_year}"
+        )
+
+
 class RussiaRunningSeriesParser(CssDirectoryParser):
     DATE_FROM_TITLE_PATTERN = re.compile(r"\b(\d{1,2}\.\d{2}\.\d{4})\b")
     DATE_FROM_TITLE_COMPACT_PATTERN = re.compile(r"(?<!\d)(\d{2})(\d{2})(20\d{2})(?!\d)")

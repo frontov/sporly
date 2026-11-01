@@ -27,6 +27,7 @@ from app.parsers.base import (
     GoldenUltraParser,
     GranFondoParser,
     GravelSeriesParser,
+    GryadkaCampsParser,
     IronStarParser,
     NapCalendarParser,
     NbcEventsParser,
@@ -1489,6 +1490,8 @@ class CatalogService:
             return RussialoppetParser(source_config)
         if source_config.parser_type == "russiarunning_series":
             return RussiaRunningSeriesParser(source_config)
+        if source_config.parser_type == "gryadka_camps":
+            return GryadkaCampsParser(source_config)
         if source_config.parser_type == "getrun":
             return GetRunParser(source_config)
         if source_config.parser_type == "bike_events":

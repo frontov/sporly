@@ -570,6 +570,22 @@
         "link": "a[href]",
         "image": "meta[property='og:image']"
       }
+    },
+    {
+      "name": "Gryadka",
+      "base_url": "https://gryadka.club",
+      "listing_urls": [
+        "https://gryadka.club"
+      ],
+      "enabled": true,
+      "parser_type": "gryadka_camps",
+      "selectors": {
+        "item": ".t774__col",
+        "title": ".t-card__title a",
+        "link": ".t-card__title a",
+        "description": ".t-card__descr",
+        "image": "meta[itemprop='image']"
+      }
     }
   ]
 }
