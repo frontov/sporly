@@ -54,7 +54,7 @@ export const FiltersPanel = ({
   const activeFilterLabels = [
     normalizedCategories.length ? normalizedCategories.join(", ") : "",
     filters.cities.length ? filters.cities.join(", ") : "",
-    filters.recommended ? "Рекомендуемые" : "",
+    filters.featured ? "Рекомендуемые" : "",
     filters.registrationStatus
       ? `Регистрация: ${REGISTRATION_OPTIONS.find((option) => option.value === filters.registrationStatus)?.label ?? filters.registrationStatus}`
       : "",
@@ -234,12 +234,12 @@ export const FiltersPanel = ({
           <div className="filters__quick-toggle-row">
             <button
               type="button"
-              className={`filters__quick-toggle${filters.recommended ? " filters__quick-toggle--active" : ""}`}
-              aria-pressed={filters.recommended}
+              className={`filters__quick-toggle${filters.featured ? " filters__quick-toggle--active" : ""}`}
+              aria-pressed={filters.featured}
               onClick={() =>
                 onChange({
                   ...filters,
-                  recommended: !filters.recommended
+                  featured: !filters.featured
                 })
               }
             >

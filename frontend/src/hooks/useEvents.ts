@@ -10,7 +10,7 @@ const buildQuery = (filters: FiltersState, page: number) => {
   if (filters.q) params.set("q", filters.q);
   filters.cities.forEach((city) => params.append("city", city));
   filters.categories.forEach((category) => params.append("category", category));
-  if (filters.recommended) params.set("recommended", "true");
+  if (filters.featured) params.set("featured", "true");
   if (filters.registrationStatus) params.set("registration_status", filters.registrationStatus);
   if (filters.kidsOnly) params.set("kids_only", "true");
   if (filters.surfaceType) params.set("surface_type", filters.surfaceType);

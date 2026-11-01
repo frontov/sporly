@@ -77,7 +77,7 @@ export type FiltersState = {
   q: string;
   cities: string[];
   categories: string[];
-  recommended: boolean;
+  featured: boolean;
   showDetails: boolean;
   registrationStatus: string;
   kidsOnly: boolean;

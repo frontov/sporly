@@ -175,7 +175,6 @@ class EventFilters:
     query: str | None = None
     cities: list[str] | None = None
     categories: list[str] | None = None
-    recommended: bool = False
     featured_only: bool = False
     registration_status: str | None = None
     kids_only: bool = False
@@ -2724,13 +2723,6 @@ class CatalogService:
                 event
                 for event in filtered
                 if (event.category or "").lower() in selected_categories
-            ]
-
-        if filters.recommended:
-            filtered = [
-                event
-                for event in filtered
-                if event.series_slug is not None
             ]
 
         if filters.featured_only:

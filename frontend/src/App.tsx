@@ -13,7 +13,7 @@ const initialFilters: FiltersState = {
   q: "",
   cities: [],
   categories: [],
-  recommended: false,
+  featured: false,
   showDetails: false,
   registrationStatus: "",
   kidsOnly: false,
@@ -58,6 +58,7 @@ const loadSavedFilters = (): FiltersState => {
     const parsed = JSON.parse(rawValue) as Partial<FiltersState>;
     const legacyCity = (parsed as { city?: string }).city;
     const legacyCategory = (parsed as { category?: string }).category;
+    const legacyRecommended = (parsed as { recommended?: boolean }).recommended;
 
     return {
       ...initialFilters,
@@ -67,7 +68,7 @@ const loadSavedFilters = (): FiltersState => {
       dateTo: typeof parsed.dateTo === "string" ? parsed.dateTo : "",
       sortBy: parsed.sortBy === "date_desc" ? "date_desc" : "date_asc",
       includePast: Boolean(parsed.includePast),
-      recommended: Boolean(parsed.recommended),
+      featured: Boolean(parsed.featured ?? legacyRecommended),
       showDetails: Boolean(parsed.showDetails),
       registrationStatus: typeof parsed.registrationStatus === "string" ? parsed.registrationStatus : "",
       kidsOnly: Boolean(parsed.kidsOnly),
