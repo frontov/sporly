@@ -45,6 +45,12 @@ const SERIES_META: Record<
     className: "event-card__series--running-community",
     icon: "https://runc.run/static/main/img/header-logo-ru.svg",
     ariaLabel: "Running Community"
+  },
+  gryadka: {
+    label: "GRYADKA",
+    className: "event-card__series--gryadka",
+    icon: "https://static.tildacdn.com/tild3565-6230-4365-a562-663666663132/__3.png",
+    ariaLabel: "Gryadka"
   }
 };
 

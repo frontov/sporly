@@ -221,6 +221,7 @@ class CatalogService:
         ("open_band", "OPEN BAND", ("open band", "openband.run", "openband")),
         ("russialoppet", "RUSSIALOPPET", ("russialoppet", "руссиалоппет", "серия лыжных марафонов")),
         ("running_community", "RUNC", ("running community", "runc.run", "московский марафон", "беговое сообщество")),
+        ("gryadka", "GRYADKA", ("gryadka", "грядка")),
     )
     OFFICIAL_SOURCE_NAMES: frozenset[str] = frozenset(
         {
@@ -248,6 +249,7 @@ class CatalogService:
             "ФББР",
             "NBC",
             "Siberian Power Show",
+            "Gryadka",
         }
     )
     REGISTRATION_SOURCE_NAMES: frozenset[str] = frozenset(
