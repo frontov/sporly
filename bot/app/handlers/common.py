@@ -117,7 +117,15 @@ HELP_TEXT = (
     "📬 дайджест ближайших стартов — раз в день утром;\n"
     "⏰ напоминания об избранном за 7, 3 и 1 день и в день старта.\n"
     "Ночью уведомления не приходят. Можно включить любую комбинацию.\n\n"
+    "<b>7. Выберите интерфейс</b>\n"
+    "/app — новый интерфейс с HTML-виджетом: старты, карточка, избранное,\n"
+    "фильтры и уведомления в одном сообщении.\n"
+    "/classic — классический интерфейс с inline-кнопками.\n"
+    "Режим запоминается и открывается по /start. В старом меню «Ещё» есть\n"
+    "кнопка «Виджет-версия», а в виджете — подсказка про /classic.\n\n"
     "<b>Команды</b>\n"
+    "/app — виджет-версия\n"
+    "/classic — классический интерфейс\n"
     "/find — поиск\n"
     "/soon — ближайшие\n"
     "/recommended — рекомендуемые старты\n"
@@ -245,6 +253,7 @@ async def cmd_start(
     await database.mark_onboarded(chat_id)
 
     event_token = payload[3:] if payload.startswith("ev_") else None
+    app_token = payload[5:].strip() if payload.startswith("wapp_") else None
     event_back: str | None = None
     if payload.startswith("evl_"):
         parts = payload.split("_")
@@ -296,6 +305,22 @@ async def cmd_start(
     await database.log_event(chat_id, "start", payload[:80] or "direct")
     await _remove_legacy_keyboard(message, chat_id, profile.ui_version)
 
+    if payload == "app" or app_token:
+        from app.widget_app import send_app_widget
+
+        await database.set_ui_mode(chat_id, "widget")
+        sent = await send_app_widget(
+            bot,
+            chat_id,
+            bot_username=bot_username,
+            start_token=app_token,
+        )
+        if sent is not None:
+            await _delete_start_message(message)
+        else:
+            await message.answer("Не удалось открыть виджет-версию.")
+        return
+
     subscription = await database.get_subscription(chat_id)
     if (
         not event_token
@@ -304,6 +329,18 @@ async def cmd_start(
         and not profile.survey_completed
         and subscription is None
     ):
+        if profile.ui_mode == "widget":
+            from app.widget_app import send_app_widget
+
+            sent_onboarding = await send_app_widget(
+                bot,
+                chat_id,
+                bot_username=bot_username,
+                initial_view="filters",
+            )
+            if sent_onboarding is not None:
+                await _delete_start_message(message)
+                return
         await send_onboarding(bot, chat_id, state)
         await _delete_start_message(message)
         return
@@ -369,6 +406,15 @@ async def cmd_start(
             )
         await _delete_start_message(message)
     else:
+        if profile.ui_mode == "widget":
+            from app.widget_app import send_app_widget
+
+            sent_app = await send_app_widget(
+                bot, chat_id, bot_username=bot_username
+            )
+            if sent_app is not None:
+                await _delete_start_message(message)
+                return
         sent_home = await send_home(bot, chat_id)
         if sent_home is not None:
             await _delete_start_message(message)
@@ -416,8 +462,8 @@ async def cmd_for_partners(message: Message, bot: Bot) -> None:
         await show_partners_info(bot, message.from_user.id)
 
 
-@router.message(Command("app", "site"))
-async def cmd_app(message: Message) -> None:
+@router.message(Command("site"))
+async def cmd_site(message: Message) -> None:
     await message.answer(
         "Полный каталог с календарём и фильтрами — на сайте.",
         reply_markup=InlineKeyboardMarkup(
@@ -476,6 +522,15 @@ async def _handle_menu_action(
                 ]
             ),
         )
+    elif action == "widget":
+        await database.set_ui_mode(chat_id, "widget")
+        from app.widget_app import send_app_widget
+
+        sent = await send_app_widget(
+            bot, chat_id, bot_username=bot_username
+        )
+        if sent is None:
+            await send_home(bot, chat_id)
 
 
 @router.callback_query(F.data.startswith("menu:"))

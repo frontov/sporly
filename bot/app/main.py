@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import warnings
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -20,7 +21,16 @@ from aiogram.types import (
 from app.api_client import api_client
 from app.config import settings
 from app.context import database
-from app.handlers import admin, common, favorites, search, subscriptions
+from app import widgets as widget_api
+from app.handlers import (
+    admin,
+    common,
+    favorites,
+    search,
+    subscriptions,
+    widget_app,
+    widgets,
+)
 from app.filter_wizard import router as filter_router
 from app.fsm_storage import SQLiteFSMStorage
 from app.redirect_server import start_redirect_server
@@ -32,11 +42,20 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+# aiogram 3.13 does not know the new widget update types. They are handled
+# manually in app.widgets; the warning prints the entire update payload.
+warnings.filterwarnings(
+    "ignore",
+    message="Detected unknown update type.*",
+    category=RuntimeWarning,
+)
 logger = logging.getLogger(__name__)
 
 
 PUBLIC_COMMANDS = [
     BotCommand(command="start", description="Запустить бота"),
+    BotCommand(command="app", description="Открыть Sporly"),
+    BotCommand(command="classic", description="Классический интерфейс"),
     BotCommand(command="find", description="Найти старт"),
     BotCommand(command="soon", description="Ближайшие старты"),
     BotCommand(command="recommended", description="Рекомендуемые старты"),
@@ -57,6 +76,7 @@ ADMIN_COMMANDS = [
     BotCommand(command="partners", description="Статистика партнёров"),
     BotCommand(command="reload", description="Сбросить кэш"),
     BotCommand(command="broadcast", description="Рассылка"),
+    BotCommand(command="widget", description="HTML-виджет (dev)"),
 ]
 
 
@@ -102,6 +122,7 @@ async def main() -> None:
     )
     storage = SQLiteFSMStorage(settings.database_path)
     dp = Dispatcher(storage=storage)
+    widget_api.setup_widget_updates(dp)
 
     # The wizard must see the state before the free-text search handler.
     dp.include_router(filter_router)
@@ -109,6 +130,8 @@ async def main() -> None:
     dp.include_router(search.router)
     dp.include_router(subscriptions.router)
     dp.include_router(favorites.router)
+    dp.include_router(widgets.router)
+    dp.include_router(widget_app.router)
     dp.include_router(common.router)
 
     redirect_runner = None
@@ -142,9 +165,14 @@ async def main() -> None:
             )
             return True
 
+        allowed_updates = dp.resolve_used_update_types()
+        for update_type in ("widget_query", "shared_widget_query"):
+            if update_type not in allowed_updates:
+                allowed_updates.append(update_type)
+
         await dp.start_polling(
             bot,
-            allowed_updates=dp.resolve_used_update_types(),
+            allowed_updates=allowed_updates,
             drop_pending_updates=settings.drop_pending_updates,
             handle_as_tasks=True,
             close_bot_session=False,

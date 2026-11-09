@@ -83,6 +83,7 @@ class User:
     created_at: str
     last_active_at: str
     reminders_enabled: bool = True
+    ui_mode: str = "classic"
 
 
 @dataclass(slots=True)
@@ -259,6 +260,7 @@ class Database:
                     referrer_id INTEGER,
                     onboarded INTEGER NOT NULL DEFAULT 0,
                     ui_version INTEGER NOT NULL DEFAULT 0,
+                    ui_mode TEXT NOT NULL DEFAULT 'classic',
                     survey_completed INTEGER NOT NULL DEFAULT 0,
                     reminders_enabled INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
@@ -354,6 +356,10 @@ class Database:
             if "ui_version" not in user_columns:
                 connection.execute(
                     "ALTER TABLE users ADD COLUMN ui_version INTEGER NOT NULL DEFAULT 0"
+                )
+            if "ui_mode" not in user_columns:
+                connection.execute(
+                    "ALTER TABLE users ADD COLUMN ui_mode TEXT NOT NULL DEFAULT 'classic'"
                 )
             if "survey_completed" not in user_columns:
                 connection.execute(
@@ -606,6 +612,7 @@ class Database:
             referrer_id=row["referrer_id"],
             onboarded=bool(row["onboarded"]),
             ui_version=int(row["ui_version"] or 0),
+            ui_mode=str(row["ui_mode"] or "classic"),
             survey_completed=bool(row["survey_completed"]),
             created_at=row["created_at"],
             last_active_at=row["last_active_at"],
@@ -698,6 +705,20 @@ class Database:
                 "UPDATE users SET ui_version = ? WHERE chat_id = ?",
                 (version, chat_id),
             )
+
+    async def set_ui_mode(self, chat_id: int, mode: str) -> bool:
+        if mode not in {"classic", "widget"}:
+            raise ValueError(f"Unsupported UI mode: {mode}")
+        return await asyncio.to_thread(self._set_ui_mode_sync, chat_id, mode)
+
+    def _set_ui_mode_sync(self, chat_id: int, mode: str) -> bool:
+        with self._db() as connection:
+            cursor = connection.execute(
+                "UPDATE users SET ui_mode = ? WHERE chat_id = ?",
+                (mode, chat_id),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
 
     async def mark_survey_completed(self, chat_id: int) -> None:
         await asyncio.to_thread(self._mark_survey_completed_sync, chat_id)

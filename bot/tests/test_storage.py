@@ -75,6 +75,18 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         user = await old_db.ensure_user(5)
         self.assertTrue(user.reminders_enabled)
         self.assertTrue(await old_db.reminders_enabled(5))
+        self.assertEqual(user.ui_mode, "classic")
+
+    async def test_ui_mode_can_be_switched(self) -> None:
+        user = await self.db.ensure_user(1)
+        self.assertEqual(user.ui_mode, "classic")
+
+        await self.db.set_ui_mode(1, "classic")
+        user = await self.db.get_user(1)
+        self.assertEqual(user.ui_mode, "classic")
+
+        with self.assertRaises(ValueError):
+            await self.db.set_ui_mode(1, "unknown")
 
     async def test_seen_events(self) -> None:
         await self.db.ensure_user(1)

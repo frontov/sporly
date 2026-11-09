@@ -249,6 +249,13 @@ def more_keyboard(
             )
         ]
     )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="🧪 Виджет-версия", callback_data="menu:widget"
+            )
+        ]
+    )
     if is_admin:
         rows.append(
             [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")]

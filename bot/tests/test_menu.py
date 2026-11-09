@@ -169,6 +169,7 @@ class HintTest(unittest.TestCase):
         self.assertNotIn("menu:notify", home_callbacks)
         self.assertNotIn("menu:notify", saved_callbacks)
         self.assertIn("menu:notify", more_callbacks)
+        self.assertIn("menu:widget", more_callbacks)
 
     def test_no_results_offers_helpful_exits(self) -> None:
         callbacks = {
