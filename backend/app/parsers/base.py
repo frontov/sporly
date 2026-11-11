@@ -1479,6 +1479,17 @@ class OrgeoParser(CssDirectoryParser):
             if deadline_match:
                 deadline = f"до {deadline_match.group(1)}"
 
+        if deadline is None:
+            countdown_match = re.search(
+                r"Осталось\s+\d+\s+(?:дн[а-яё]*|час[а-яё]*|минут[а-яё]*)"
+                r"\s+до\s+"
+                r"(\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{2}:\d{2})?)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if countdown_match:
+                deadline = f"до {countdown_match.group(1)}"
+
         if "лист ожидания" in text.casefold():
             status = "limited"
 

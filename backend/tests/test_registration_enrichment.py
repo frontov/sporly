@@ -178,6 +178,16 @@ class OrgeoRegistrationTest(unittest.TestCase):
         self.assertEqual(status, "closed")
         self.assertEqual(deadline, "до 11.11.2026 12:00")
 
+    def test_countdown_deadline_is_parsed(self) -> None:
+        soup = _soup(
+            "<a href='/claim/create/event_id/56615'>Подать заявку</a>"
+            "<p>Осталось 4 дня до 15.11.2026 23:55 МСК</p>"
+        )
+
+        status, deadline = self.parser._extract_orgeo_registration_details(soup)
+        self.assertEqual(status, "open")
+        self.assertEqual(deadline, "до 15.11.2026 23:55")
+
 
 if __name__ == "__main__":
     unittest.main()

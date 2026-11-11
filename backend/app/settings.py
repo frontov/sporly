@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     source_timeout_seconds: float = 45.0
     enrich_timeout_seconds: float = 40.0
     max_concurrent_sources: int = 2
-    max_enrich_events_per_source: int = 250
+    max_enrich_events_per_source: int = 500
     minimum_refresh_ratio: float = 0.7
     cache_ttl_seconds: int = 300
     refresh_scheduler_enabled: bool = True
