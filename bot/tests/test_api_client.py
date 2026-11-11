@@ -55,6 +55,23 @@ class ApiClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen["params"]["date_from"], "2026-11-01")
         self.assertNotIn("sort_by", seen["params"])
 
+    async def test_events_by_ids_sends_ids_and_batches_requests(self) -> None:
+        seen: list[list[str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.params.get_list("ids"))
+            return httpx.Response(200, json=EMPTY_PAGE)
+
+        self._mock(handler)
+        event_ids = [f"id-{index}" for index in range(61)]
+
+        events = await self.api.get_events_by_ids(event_ids)
+
+        self.assertEqual(events, [])
+        self.assertEqual([len(chunk) for chunk in seen], [60, 1])
+        self.assertEqual(seen[0], event_ids[:60])
+        self.assertEqual(seen[1], event_ids[60:])
+
     async def test_admin_requests_send_the_admin_token(self) -> None:
         seen: dict[str, object] = {}
         original = settings.admin_token

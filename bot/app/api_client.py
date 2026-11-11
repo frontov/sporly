@@ -14,6 +14,9 @@ from app.text import local_today
 
 logger = logging.getLogger(__name__)
 
+# Matches the backend page_size cap for /api/events.
+EVENTS_BY_IDS_BATCH = 60
+
 
 def join_location(city: str | None, region: str | None) -> str:
     city = (city or "").strip()
@@ -96,6 +99,7 @@ class EventQuery:
     categories: list[str] = field(default_factory=list)
     date_from: str | None = None
     first_seen_after: str | None = None
+    ids: list[str] = field(default_factory=list)
     page: int = 1
     page_size: int = 4
     sort_by: str = "date_asc"
@@ -114,6 +118,8 @@ class EventQuery:
             params.append(("city", city))
         for category in self.categories:
             params.append(("category", category))
+        for event_id in self.ids:
+            params.append(("ids", event_id))
         if self.date_from:
             params.append(("date_from", self.date_from))
         if self.first_seen_after and not self.featured:
@@ -159,6 +165,28 @@ class ApiClient:
             )[:100]:
                 self._cache.pop(stale_key, None)
         return page
+
+    async def get_events_by_ids(self, event_ids: list[str]) -> list[Event]:
+        """Load the current catalog state for a set of favorite events."""
+
+        unique_ids = list(dict.fromkeys(
+            str(event_id).strip()
+            for event_id in event_ids
+            if str(event_id).strip()
+        ))
+        events: list[Event] = []
+        for start in range(0, len(unique_ids), EVENTS_BY_IDS_BATCH):
+            chunk = unique_ids[start:start + EVENTS_BY_IDS_BATCH]
+            page = await self.get_events(
+                EventQuery(
+                    ids=chunk,
+                    page=1,
+                    page_size=len(chunk),
+                    sort_by="date_asc",
+                )
+            )
+            events.extend(page.items)
+        return events
 
     async def get_filter_options(self, *, force: bool = False) -> tuple[list[str], list[str]]:
         now = time.monotonic()

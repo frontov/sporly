@@ -149,6 +149,51 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.db.remove_favorite(1, "myrace-4ab3bb1a6722"))
         self.assertEqual(await self.db.favorites(1), [])
 
+    async def test_refresh_favorite_updates_only_the_snapshot(self) -> None:
+        await self.db.ensure_user(1)
+        await self.db.add_favorite(
+            1,
+            {
+                "event_id": "event-1",
+                "title": "Забег",
+                "starts_at": "2027-05-10T00:00:00",
+                "date_text": "10.05.2027",
+                "source_url": "https://example.com/event",
+                "city": "Санкт-Петербург",
+                "region": "Санкт-Петербург",
+                "category": "Бег",
+                "registration_status": "upcoming",
+            },
+        )
+        await self.db.mark_reminded(1, "event-1", "7")
+        original = (await self.db.favorites(1))[0]
+
+        refreshed = await self.db.refresh_favorite(
+            1,
+            {
+                "event_id": "event-1",
+                "title": "Забег (обновлено)",
+                "starts_at": "2027-05-10T00:00:00",
+                "date_text": "10.05.2027",
+                "source_url": "https://example.com/event",
+                "city": "Санкт-Петербург",
+                "region": "Санкт-Петербург",
+                "category": "Бег",
+                "registration_status": "open",
+                "registration_opens_at": "2026-12-01T10:00:00",
+            },
+        )
+
+        self.assertTrue(refreshed)
+        favorite = (await self.db.favorites(1))[0]
+        self.assertEqual(favorite.title, "Забег (обновлено)")
+        self.assertEqual(favorite.registration_status, "open")
+        self.assertEqual(
+            favorite.registration_opens_at, "2026-12-01T10:00:00"
+        )
+        self.assertEqual(favorite.reminded_offsets, ["7"])
+        self.assertEqual(favorite.created_at, original.created_at)
+
     async def test_old_favorite_ids_are_migrated_on_open(self) -> None:
         await self.db.ensure_user(1)
         with sqlite3.connect(self.db.path) as connection:

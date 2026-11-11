@@ -127,6 +127,185 @@ class RegistrationNoticeTest(unittest.TestCase):
 
         self.assertIsNone(registration_notice_kind(favorite, today=self.today))
 
+    def test_open_transition_sends_start_notice_without_explicit_date(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="open",
+            created_at="2026-10-01T10:00:00",
+        )
+
+        self.assertEqual(
+            registration_notice_kind(
+                favorite, today=self.today, previous_status="upcoming"
+            ),
+            REGISTRATION_START_OFFSET,
+        )
+
+    def test_open_transition_sends_start_notice_from_unknown_state(self) -> None:
+        favorite = self.make_favorite(registration_status="open")
+
+        self.assertEqual(
+            registration_notice_kind(
+                favorite, today=self.today, previous_status=None
+            ),
+            REGISTRATION_START_OFFSET,
+        )
+
+    def test_no_start_notice_without_status_transition(self) -> None:
+        favorite = self.make_favorite(registration_status="open")
+
+        self.assertIsNone(
+            registration_notice_kind(
+                favorite, today=self.today, previous_status="open"
+            )
+        )
+
+    def test_open_transition_does_not_repeat(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="open",
+            reminded_offsets=[REGISTRATION_START_OFFSET],
+        )
+
+        self.assertIsNone(
+            registration_notice_kind(
+                favorite, today=self.today, previous_status="upcoming"
+            )
+        )
+
+    def test_open_transition_after_deadline_is_ignored(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="open",
+            registration_deadline="2026-11-01T23:59:00",
+        )
+
+        self.assertIsNone(
+            registration_notice_kind(
+                favorite, today=self.today, previous_status="upcoming"
+            )
+        )
+
+
+class RegistrationNoticeDeliveryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_open_transition_is_delivered_and_snapshot_advances(self) -> None:
+        favorite = Favorite(
+            chat_id=1,
+            event_id="event-1",
+            title="Забег",
+            starts_at="2027-05-10T00:00:00",
+            date_text="10.05.2027",
+            source_url="https://example.com/event",
+            registration_status="upcoming",
+            created_at="2026-10-01T10:00:00",
+        )
+        fresh = Event(
+            id="event-1",
+            title="Забег",
+            source_url="https://example.com/event",
+            starts_at="2027-05-10T00:00:00",
+            registration_status="open",
+        )
+        bot = AsyncMock()
+        mark_reminded = AsyncMock()
+        refresh_favorite = AsyncMock(return_value=True)
+
+        with (
+            patch.object(scheduler, "is_quiet_hours", return_value=False),
+            patch.object(
+                scheduler.database,
+                "all_favorites",
+                AsyncMock(return_value=[favorite]),
+            ),
+            patch.object(
+                scheduler.database,
+                "reminders_enabled",
+                AsyncMock(return_value=True),
+            ),
+            patch.object(
+                scheduler.database, "mark_reminded", mark_reminded
+            ),
+            patch.object(
+                scheduler.database, "refresh_favorite", refresh_favorite
+            ),
+            patch.object(scheduler.database, "log_event", AsyncMock()),
+            patch.object(
+                scheduler.api_client,
+                "get_events_by_ids",
+                AsyncMock(return_value=[fresh]),
+            ),
+            patch.object(
+                scheduler,
+                "_event_tokens",
+                AsyncMock(return_value={"event-1": "token-1"}),
+            ),
+        ):
+            sent = await scheduler.send_registration_notices(bot)
+
+        self.assertEqual(sent, 1)
+        text = bot.send_message.await_args.args[1]
+        self.assertIn("Регистрация открыта", text)
+        mark_reminded.assert_awaited_once_with(
+            1, "event-1", REGISTRATION_START_OFFSET
+        )
+        payload = refresh_favorite.await_args.args[1]
+        self.assertEqual(payload["registration_status"], "open")
+
+    async def test_failed_delivery_keeps_the_old_snapshot(self) -> None:
+        favorite = Favorite(
+            chat_id=1,
+            event_id="event-1",
+            title="Забег",
+            starts_at="2027-05-10T00:00:00",
+            date_text="10.05.2027",
+            source_url="https://example.com/event",
+            registration_status="upcoming",
+            created_at="2026-10-01T10:00:00",
+        )
+        fresh = Event(
+            id="event-1",
+            title="Забег",
+            source_url="https://example.com/event",
+            registration_status="open",
+        )
+        bot = AsyncMock()
+        bot.send_message.side_effect = RuntimeError("telegram is down")
+        mark_reminded = AsyncMock()
+        refresh_favorite = AsyncMock(return_value=True)
+
+        with (
+            patch.object(scheduler, "is_quiet_hours", return_value=False),
+            patch.object(
+                scheduler.database,
+                "all_favorites",
+                AsyncMock(return_value=[favorite]),
+            ),
+            patch.object(
+                scheduler.database,
+                "reminders_enabled",
+                AsyncMock(return_value=True),
+            ),
+            patch.object(
+                scheduler.database, "mark_reminded", mark_reminded
+            ),
+            patch.object(
+                scheduler.database, "refresh_favorite", refresh_favorite
+            ),
+            patch.object(scheduler.database, "log_event", AsyncMock()),
+            patch.object(
+                scheduler.api_client,
+                "get_events_by_ids",
+                AsyncMock(return_value=[fresh]),
+            ),
+            patch.object(
+                scheduler,
+                "_event_tokens",
+                AsyncMock(return_value={"event-1": "token-1"}),
+            ),
+        ):
+            sent = await scheduler.send_registration_notices(bot)
+
+        self.assertEqual(sent, 0)
+        mark_reminded.assert_not_awaited()
+        refresh_favorite.assert_not_awaited()
+
 
 class QuietHoursTest(unittest.TestCase):
     @staticmethod

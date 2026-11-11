@@ -1017,6 +1017,50 @@ class Database:
             )
             connection.commit()
 
+    async def refresh_favorite(self, chat_id: int, event: dict[str, Any]) -> bool:
+        """Update a stored favorite snapshot without touching reminder state."""
+
+        return await asyncio.to_thread(
+            self._refresh_favorite_sync, chat_id, event
+        )
+
+    def _refresh_favorite_sync(self, chat_id: int, event: dict[str, Any]) -> bool:
+        raw_event_id = str(event["event_id"])
+        with self._db() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE favorites SET
+                    title = ?,
+                    starts_at = ?,
+                    date_text = ?,
+                    source_url = ?,
+                    city = ?,
+                    region = ?,
+                    category = ?,
+                    registration_status = ?,
+                    registration_opens_at = ?,
+                    registration_deadline = ?
+                WHERE chat_id = ? AND event_id IN (?, ?)
+                """,
+                (
+                    str(event.get("title") or "Событие"),
+                    event.get("starts_at"),
+                    event.get("date_text"),
+                    str(event.get("source_url") or ""),
+                    event.get("city"),
+                    event.get("region"),
+                    event.get("category"),
+                    event.get("registration_status"),
+                    event.get("registration_opens_at"),
+                    event.get("registration_deadline"),
+                    chat_id,
+                    stable_event_id(raw_event_id),
+                    raw_event_id,
+                ),
+            )
+            connection.commit()
+            return cursor.rowcount > 0
+
     async def remove_favorite(self, chat_id: int, event_id: str) -> bool:
         return await asyncio.to_thread(
             self._remove_favorite_sync, chat_id, event_id

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 import logging
 from html import escape
@@ -29,7 +30,7 @@ from app.formatting import (
 )
 from app.keyboards import BUTTON_HOME, BUTTON_INTERESTS, BUTTON_OPEN
 from app.links import event_click_url
-from app.storage import Favorite, Subscription, event_identity
+from app.storage import Favorite, Subscription, event_identity, stable_event_id
 from app.text import (
     MOSCOW_TZ,
     REGISTRATION_END_OFFSET,
@@ -43,6 +44,8 @@ from app.text import (
 
 logger = logging.getLogger(__name__)
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+REGISTRATION_OPEN_STATUSES = frozenset({"open", "limited"})
+_UNSET = object()
 
 
 def _quiet_hour(hour: int) -> bool:
@@ -428,24 +431,49 @@ def reminder_offset(days: int, sent_offsets: set[str]) -> int | None:
 def registration_notice_kind(
     favorite: Favorite,
     today: date | None = None,
+    *,
+    previous_status: object = _UNSET,
 ) -> str | None:
-    """Return which registration notice is due for a favorite, if any."""
+    """Return which registration notice is due for a favorite, if any.
+
+    ``previous_status`` is the status stored when the favorite was saved. When
+    it transitions from a not-yet-open state to an open one, the notice is sent
+    even if the source never published an explicit registration opening date.
+    """
 
     sent = set(favorite.reminded_offsets)
     today = today or local_today()
     deadline_days = days_until(favorite.registration_deadline)
+    status = (favorite.registration_status or "").casefold()
 
     if (
         REGISTRATION_START_OFFSET not in sent
-        and favorite.registration_status != "closed"
-        and (opens_at := parse_date(favorite.registration_opens_at)) is not None
-        and opens_at <= today
+        and status != "closed"
         and (deadline_days is None or deadline_days >= 0)
     ):
-        created_at = parse_date(favorite.created_at)
-        # A favorite added after registration had already opened should not
-        # trigger a stale "registration just started" message.
-        if created_at is None or created_at <= opens_at:
+        opened_by_date = False
+        if (
+            (opens_at := parse_date(favorite.registration_opens_at)) is not None
+            and opens_at <= today
+        ):
+            created_at = parse_date(favorite.created_at)
+            # A favorite added after registration had already opened should
+            # not trigger a stale "registration just started" message.
+            opened_by_date = created_at is None or created_at <= opens_at
+
+        opened_by_status = False
+        if previous_status is not _UNSET:
+            previous = (
+                previous_status.casefold()
+                if isinstance(previous_status, str)
+                else ""
+            )
+            opened_by_status = (
+                status in REGISTRATION_OPEN_STATUSES
+                and previous not in REGISTRATION_OPEN_STATUSES
+            )
+
+        if opened_by_date or opened_by_status:
             return REGISTRATION_START_OFFSET
 
     if (
@@ -467,26 +495,123 @@ def _registration_notice_line(kind: str, favorite: Favorite) -> str:
     return "⏳ Регистрация закрывается завтра"
 
 
+def _favorite_payload(favorite: Favorite) -> dict[str, object]:
+    return {
+        "event_id": favorite.event_id,
+        "title": favorite.title,
+        "starts_at": favorite.starts_at,
+        "date_text": favorite.date_text,
+        "source_url": favorite.source_url,
+        "city": favorite.city,
+        "region": favorite.region,
+        "category": favorite.category,
+        "registration_status": favorite.registration_status,
+        "registration_opens_at": favorite.registration_opens_at,
+        "registration_deadline": favorite.registration_deadline,
+    }
+
+
+async def _refresh_favorite_states(
+    favorites: list[Favorite],
+) -> dict[tuple[int, str], Favorite]:
+    """Re-read favorites from the catalog so later status changes are noticed."""
+
+    if not favorites:
+        return {}
+
+    try:
+        events = await api_client.get_events_by_ids(
+            [favorite.event_id for favorite in favorites]
+        )
+    except Exception as error:
+        logger.warning("Cannot refresh favorites from the catalog: %s", error)
+        return {}
+
+    by_id: dict[str, Event] = {}
+    for event in events:
+        by_id[event.id] = event
+        by_id.setdefault(stable_event_id(event.id), event)
+
+    refreshed: dict[tuple[int, str], Favorite] = {}
+    for favorite in favorites:
+        event = by_id.get(favorite.event_id) or by_id.get(
+            stable_event_id(favorite.event_id)
+        )
+        if event is None:
+            continue
+        refreshed[(favorite.chat_id, favorite.event_id)] = replace(
+            favorite,
+            title=event.title or favorite.title,
+            starts_at=event.starts_at or favorite.starts_at,
+            date_text=event.date_text or favorite.date_text,
+            source_url=event.source_url or favorite.source_url,
+            city=event.city or favorite.city,
+            region=event.region or favorite.region,
+            category=event.category or favorite.category,
+            registration_status=(
+                event.registration_status or favorite.registration_status
+            ),
+            registration_opens_at=(
+                event.registration_opens_at or favorite.registration_opens_at
+            ),
+            registration_deadline=(
+                event.registration_deadline or favorite.registration_deadline
+            ),
+        )
+    return refreshed
+
+
+async def _persist_favorite_states(
+    chat_id: int, favorites: list[Favorite]
+) -> None:
+    for favorite in favorites:
+        try:
+            await database.refresh_favorite(
+                chat_id, _favorite_payload(favorite)
+            )
+        except Exception as error:
+            logger.warning(
+                "Cannot refresh favorite %s/%s: %s",
+                chat_id,
+                favorite.event_id,
+                error,
+            )
+
+
 async def send_registration_notices(bot: Bot, bot_username: str = "") -> int:
     # Registration notices are never sent at night.
     if is_quiet_hours():
         return 0
 
     favorites = await database.all_favorites()
+    if not favorites:
+        return 0
+
+    # Favorites keep the state that was current when the user saved them.
+    # Registration often opens later, so compare against the live catalog.
+    refreshed = await _refresh_favorite_states(favorites)
+
     reminders_cache: dict[int, bool] = {}
     due_by_chat: dict[int, list[tuple[Favorite, str]]] = {}
+    chats: dict[int, list[Favorite]] = {}
 
     for favorite in favorites:
         if favorite.chat_id not in reminders_cache:
             reminders_cache[favorite.chat_id] = await database.reminders_enabled(
                 favorite.chat_id
             )
+        current = refreshed.get(
+            (favorite.chat_id, favorite.event_id), favorite
+        )
+        chats.setdefault(favorite.chat_id, []).append(current)
         if not reminders_cache[favorite.chat_id]:
             continue
-        kind = registration_notice_kind(favorite)
+        kind = registration_notice_kind(
+            current, previous_status=favorite.registration_status
+        )
         if kind is None:
             continue
-        due_by_chat.setdefault(favorite.chat_id, []).append((favorite, kind))
+        due_by_chat.setdefault(favorite.chat_id, []).append((current, kind))
 
     sent = 0
     for chat_id, due in due_by_chat.items():
@@ -545,12 +670,21 @@ async def send_registration_notices(bot: Bot, bot_username: str = "") -> int:
             await database.log_event(
                 chat_id, "registration_notices_sent", str(len(due))
             )
+            # Only advance the snapshot after delivery: if sending fails, the
+            # upcoming -> open transition must still be visible on the next run.
+            await _persist_favorite_states(chat_id, chats.get(chat_id, []))
             sent += 1
         except Exception as error:
             logger.warning(
                 "Cannot send registration notices to %s: %s", chat_id, error
             )
         await asyncio.sleep(0.05)
+
+    for chat_id, chat_favorites in chats.items():
+        if chat_id in due_by_chat:
+            continue
+        await _persist_favorite_states(chat_id, chat_favorites)
+
     return sent
 
 
