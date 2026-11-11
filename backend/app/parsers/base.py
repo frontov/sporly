@@ -276,6 +276,19 @@ class CssDirectoryParser:
             if label not in distances:
                 distances.append(label)
 
+        meters_group_match = re.search(
+            r"(\d{3,5}(?:\s*(?:/|и|-|•|;|,\s+)\s*\d{3,5})+)\s*(м)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if meters_group_match:
+            for value in re.findall(r"\d{3,5}", meters_group_match.group(1)):
+                meters = int(value)
+                if 200 <= meters <= 10000:
+                    label = f"{meters} м"
+                    if label not in distances:
+                        distances.append(label)
+
         for value, _unit in re.findall(r"(\d{3,5})\s*(м)\b", normalized, flags=re.IGNORECASE):
             meters = int(value)
             if meters >= 200 and meters <= 10000:
@@ -2982,6 +2995,337 @@ class VelomarathonParser(CssDirectoryParser):
         if "белопесоцкий" in lowered or "ильинское" in lowered or "габо" in lowered:
             return "Московская область"
         return None
+
+
+class PushkinRunParser(CssDirectoryParser):
+    """Tilda zero-block race calendar on pushkin-run.ru.
+
+    Every race is a separate ``t-rec`` section built from a Tilda 396 artboard:
+    the title, distances summary, description, month/day and action buttons are
+    absolutely positioned ``t396__elem`` nodes, so a card has to be assembled
+    from its elements instead of a single container selector. The page renders
+    the same calendar twice (desktop and mobile variants); the desktop copy is
+    parsed first and the mobile copy is used to fill in anything missing.
+    """
+
+    MONTHS = {
+        "январь": 1,
+        "января": 1,
+        "февраль": 2,
+        "февраля": 2,
+        "март": 3,
+        "марта": 3,
+        "апрель": 4,
+        "апреля": 4,
+        "май": 5,
+        "мая": 5,
+        "июнь": 6,
+        "июня": 6,
+        "июль": 7,
+        "июля": 7,
+        "август": 8,
+        "августа": 8,
+        "сентябрь": 9,
+        "сентября": 9,
+        "октябрь": 10,
+        "октября": 10,
+        "ноябрь": 11,
+        "ноября": 11,
+        "декабрь": 12,
+        "декабря": 12,
+    }
+    MONTH_NAMES = (
+        "",
+        "января",
+        "февраля",
+        "марта",
+        "апреля",
+        "мая",
+        "июня",
+        "июля",
+        "августа",
+        "сентября",
+        "октября",
+        "ноября",
+        "декабря",
+    )
+    MONTH_NOMINATIVES = (
+        "",
+        "январь",
+        "февраль",
+        "март",
+        "апрель",
+        "май",
+        "июнь",
+        "июль",
+        "август",
+        "сентябрь",
+        "октябрь",
+        "ноябрь",
+        "декабрь",
+    )
+    COUNTDOWN_LABELS = ("дни", "часы", "минуты", "секунды")
+    COUNTDOWN_PATTERN = re.compile(r"^[\d\s:]+$")
+    YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
+    DEFAULT_CITY = "Санкт-Петербург"
+    CATEGORY = "Бег"
+
+    def parse(
+        self,
+        html: str,
+        page_url: str,
+        now: datetime | None = None,
+    ) -> list[Event]:
+        soup = BeautifulSoup(html, "html.parser")
+        base_page_url = page_url.split("#", 1)[0]
+        now = now or datetime.now()
+
+        records = soup.select('div.t-rec[data-record-type="396"]')
+        desktop_records = [
+            record
+            for record in records
+            if "t-screenmin-980px" in (record.get("class") or [])
+        ]
+
+        cards: dict[str, dict[str, Any]] = {}
+        for record in [*desktop_records, *records]:
+            card = self._parse_card(record)
+            if card is None:
+                continue
+            key = card["title"].casefold()
+            existing = cards.get(key)
+            if existing is None:
+                cards[key] = card
+            else:
+                self._merge_card(existing, card)
+
+        events: list[Event] = []
+        for card in cards.values():
+            starts_at, date_text = self._resolve_date(card, now)
+            if card["explicit_year"] is not None and self._is_past(
+                card["explicit_year"], card["month"], card["day"], now
+            ):
+                continue
+
+            source_url = (
+                card["detail_url"]
+                or card["registration_url"]
+                or f"{base_page_url}#event-{len(events) + 1}"
+            )
+            stable_hash = hashlib.sha1(source_url.encode("utf-8")).hexdigest()[:12]
+            haystack = " ".join(
+                part
+                for part in (
+                    card["title"],
+                    card["dates_text"],
+                    card["description"],
+                )
+                if part
+            ).casefold()
+
+            events.append(
+                Event(
+                    id=f"pushkin-run-{len(events)}-{stable_hash}",
+                    title=card["title"],
+                    description=card["description"],
+                    distance_summary=card["distance_summary"],
+                    kids_available=True if "детск" in haystack else None,
+                    city=self.DEFAULT_CITY,
+                    region=self.DEFAULT_CITY,
+                    category=self.CATEGORY,
+                    date_text=date_text,
+                    starts_at=starts_at,
+                    registration_status=card["registration_status"],
+                    source_name=self.config.name,
+                    source_url=source_url,
+                )
+            )
+
+        return events
+
+    def _merge_card(
+        self, target: dict[str, Any], other: dict[str, Any]
+    ) -> None:
+        """Fill gaps in a card with data from its desktop/mobile twin."""
+        for key in (
+            "month",
+            "day",
+            "dates_text",
+            "detail_url",
+            "registration_url",
+            "description",
+        ):
+            if not target.get(key) and other.get(key):
+                target[key] = other[key]
+        if not target.get("distance_summary") and other.get("distance_summary"):
+            target["distance_summary"] = other["distance_summary"]
+        target_status = target.get("registration_status")
+        other_status = other.get("registration_status")
+        if other_status == "open" or not target_status:
+            target["registration_status"] = other_status or target_status
+
+    def _parse_card(self, record: Any) -> dict[str, Any] | None:
+        texts: list[tuple[list[str], int]] = []
+        for element in record.select('.t396__elem[data-elem-type="text"]'):
+            font_size = element.get("data-field-fontsize-value")
+            try:
+                font_size_value = int(font_size)
+            except (TypeError, ValueError):
+                font_size_value = 0
+            raw_text = element.get_text("\n", strip=True)
+            lines = [
+                self._normalize_text(line)
+                for line in raw_text.split("\n")
+                if line.strip()
+            ]
+            if lines:
+                texts.append((lines, font_size_value))
+
+        if not texts:
+            return None
+
+        month: int | None = None
+        day: int | None = None
+        dates_text: str | None = None
+        candidates: list[tuple[list[str], int]] = []
+
+        for lines, font_size in texts:
+            text = " ".join(lines)
+            month_number = self.MONTHS.get(text.casefold())
+            if month_number is not None and month is None:
+                month = month_number
+                continue
+            if re.fullmatch(r"\d{1,2}", text) and day is None:
+                day = int(text)
+                continue
+            if text.casefold().startswith("дистанции"):
+                dates_text = text
+                continue
+            if text.casefold() in self.COUNTDOWN_LABELS:
+                continue
+            if self.COUNTDOWN_PATTERN.fullmatch(text):
+                continue
+            candidates.append((lines, font_size))
+
+        # Cards without a month are teasers (e.g. the weekly Sunday runs).
+        if month is None or not candidates:
+            return None
+
+        title_lines, title_size = max(candidates, key=lambda item: item[1])
+        candidates.remove((title_lines, title_size))
+        title = " ".join(title_lines)
+        candidates_text = [" ".join(lines) for lines, _ in candidates]
+        description = max(candidates_text, key=len, default=None)
+
+        detail_url, registration_url = self._extract_links(record)
+        registration_status = None
+        if registration_url:
+            registration_status = "open"
+        for element in record.select('.t396__elem[data-elem-type="button"]'):
+            label = self._normalize_text(element.get_text(" ", strip=True)).casefold()
+            if "регистрац" in label and any(
+                marker in label for marker in ("скоро", "готовится")
+            ):
+                registration_status = "upcoming"
+
+        explicit_year = self._explicit_year(title)
+
+        return {
+            "title": title,
+            "description": description,
+            "dates_text": dates_text,
+            "distance_summary": self._distance_summary(dates_text),
+            "month": month,
+            "day": day,
+            "detail_url": detail_url,
+            "registration_url": registration_url,
+            "registration_status": registration_status,
+            "explicit_year": explicit_year,
+        }
+
+    def _distance_summary(self, dates_text: str | None) -> str | None:
+        if not dates_text:
+            return None
+        raw_value = dates_text.split(":", 1)[-1].strip(" .")
+        # Relay formats (e.g. "5км-10км-5км-..." on the Ekiden card) list the
+        # same distance more than once, which the generic summary collapses.
+        if re.search(r"\d\s*км\s*-", raw_value, flags=re.IGNORECASE):
+            return self._normalize_text(raw_value) or None
+        return (
+            self._extract_distance_summary_from_text(dates_text)
+            or self._normalize_text(raw_value)
+            or None
+        )
+
+    def _extract_links(self, record: Any) -> tuple[str | None, str | None]:
+        detail_url: str | None = None
+        registration_url: str | None = None
+        for link in record.select("a[href]"):
+            href = link.get("href")
+            if not isinstance(href, str) or not href.strip():
+                continue
+            label = self._normalize_text(link.get_text(" ", strip=True)).casefold()
+            full_url = urljoin(self.config.base_url, href)
+            if "регистрац" in label and registration_url is None:
+                registration_url = full_url
+            elif "подробнее" in label and detail_url is None:
+                detail_url = full_url
+        return detail_url, registration_url
+
+    def _resolve_date(
+        self,
+        card: dict[str, Any],
+        now: datetime,
+    ) -> tuple[str | None, str]:
+        month = card["month"]
+        day = card["day"]
+        year = card["explicit_year"]
+
+        if year is None:
+            if day is not None:
+                year = now.year + (
+                    1 if (month, day) < (now.month, now.day) else 0
+                )
+            else:
+                year = now.year + (1 if month < now.month else 0)
+
+        if day is not None:
+            try:
+                starts_at = datetime(year, month, day).isoformat()
+            except ValueError:
+                starts_at = None
+            date_text = f"{day} {self.MONTH_NAMES[month]} {year}"
+        else:
+            starts_at = None
+            date_text = f"{self.MONTH_NOMINATIVES[month]} {year}"
+        return starts_at, date_text
+
+    def _is_past(
+        self,
+        year: int,
+        month: int,
+        day: int | None,
+        now: datetime,
+    ) -> bool:
+        if year < now.year:
+            return True
+        if year > now.year:
+            return False
+        if month < now.month:
+            return True
+        if month > now.month:
+            return False
+        if day is None:
+            return False
+        return day < now.day
+
+    def _explicit_year(self, title: str) -> int | None:
+        years = [int(value) for value in self.YEAR_PATTERN.findall(title or "")]
+        return max(years) if years else None
+
+    @staticmethod
+    def _normalize_text(value: str) -> str:
+        return re.sub(r"\s+", " ", value.replace("\xa0", " ")).strip()
 
 
 class GranFondoParser(CssDirectoryParser):

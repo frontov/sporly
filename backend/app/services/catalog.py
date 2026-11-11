@@ -41,6 +41,7 @@ from app.parsers.base import (
     NezhesteamParser,
     OTimeCalendarParser,
     OrgeoParser,
+    PushkinRunParser,
     RaceTimeParser,
     RegPlaceParser,
     RussiaRunningSeriesParser,
@@ -203,6 +204,7 @@ class EventFilters:
     surface_type: str | None = None
     difficulty_level: str | None = None
     source: str | None = None
+    ids: list[str] | None = None
     date_from: str | None = None
     date_to: str | None = None
     first_seen_after: str | None = None
@@ -1517,6 +1519,8 @@ class CatalogService:
             return RussiaRunningSeriesParser(source_config)
         if source_config.parser_type == "gryadka_camps":
             return GryadkaCampsParser(source_config)
+        if source_config.parser_type == "pushkin_run":
+            return PushkinRunParser(source_config)
         if source_config.parser_type == "getrun":
             return GetRunParser(source_config)
         if source_config.parser_type == "bike_events":
@@ -1775,13 +1779,15 @@ class CatalogService:
         if not any(token not in GENERIC_TITLE_TOKENS for token in smaller):
             return False
 
-        extra = larger - smaller
+        extra = {
+            token
+            for token in larger - smaller
+            if token not in GENERIC_TITLE_TOKENS
+        }
         if len(extra) > 3:
             return False
 
         for token in extra:
-            if token in GENERIC_TITLE_TOKENS:
-                continue
             if any(marker in token for marker in VARIANT_TITLE_MARKERS):
                 return False
             if any(character.isdigit() for character in token):
@@ -1856,6 +1862,13 @@ class CatalogService:
         # Strip quotes, emoji and other punctuation; keep letters/digits.
         normalized = re.sub(r"[^\w\s]+", " ", normalized)
         normalized = re.sub(r"\b(?:19|20)\d{2}\b", " ", normalized)
+        # "9-й Царскосельский марафон" and "Царскосельский марафон 2027"
+        # describe the same race; the edition number must not block the merge.
+        normalized = re.sub(
+            r"^\s*\d+\s*(?:ой|ий|ый|го|я|й)\s+",
+            " ",
+            normalized,
+        )
         normalized = re.sub(
             r"^\s*[ivxlcdmіх]+\s*(?:[-–—.:]\s*)?(?:й|я)?\s+",
             "",
@@ -3020,6 +3033,17 @@ class CatalogService:
             filtered = [
                 event for event in filtered if (event.source_name or "").lower() == source
             ]
+
+        if filters.ids:
+            wanted_ids = {
+                str(event_id).strip()
+                for event_id in filters.ids
+                if str(event_id).strip()
+            }
+            if wanted_ids:
+                filtered = [
+                    event for event in filtered if event.id in wanted_ids
+                ]
 
         if filters.date_from:
             filtered = [

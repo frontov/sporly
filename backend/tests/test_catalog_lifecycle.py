@@ -133,6 +133,17 @@ class CatalogLifecycleTest(unittest.TestCase):
 
         self.assertEqual(filtered, [])
 
+    def test_event_id_filter_keeps_only_requested_events(self) -> None:
+        first = make_event(1, event_id="event-a")
+        second = make_event(2, event_id="event-b")
+
+        filtered = self.service._apply_filters(
+            [first, second],
+            EventFilters(ids=["event-b", "missing"]),
+        )
+
+        self.assertEqual([event.id for event in filtered], ["event-b"])
+
     def test_event_id_drops_listing_index(self) -> None:
         event = make_event(
             0,
@@ -204,6 +215,81 @@ class CatalogLifecycleTest(unittest.TestCase):
             title="Granfondo Волоколамск Дети",
             city="Волоколамск",
             region="Московская область",
+        )
+
+        deduped = self.service._deduplicate([first, second])
+
+        self.assertEqual(len(deduped), 2)
+
+    def test_edition_prefix_does_not_block_merge(self) -> None:
+        first = make_event(
+            1,
+            source="PushkinRun",
+            event_id="pushkin-run-0-aaaaaaaaaaaa",
+            title="9-Й Царскосельский Марафон",
+            city="Санкт-Петербург",
+            region="Санкт-Петербург",
+            starts_at="2027-05-10T00:00:00",
+        )
+        second = make_event(
+            2,
+            source="Russia Running",
+            event_id="russiarunning-bbbbbbbbbbbb",
+            title="Царскосельский Марафон 2027",
+            city="Санкт-Петербург",
+            region="Санкт-Петербург",
+            starts_at="2027-05-10T00:00:00",
+        )
+
+        deduped = self.service._deduplicate([first, second])
+
+        self.assertEqual(len(deduped), 1)
+
+    def test_championship_suffix_does_not_block_merge(self) -> None:
+        first = make_event(
+            1,
+            source="PushkinRun",
+            event_id="pushkin-run-1-aaaaaaaaaaaa",
+            title=(
+                "100-й ПЕТЕРБУРГСКИЙ МАРАФОН Пушкин - петербург / "
+                "ЧЕМПИОНАТ РОССИИ ПО МАРАФОНУ"
+            ),
+            city="Санкт-Петербург",
+            region="Санкт-Петербург",
+            starts_at="2027-09-05T00:00:00",
+        )
+        second = make_event(
+            2,
+            source="Russia Running",
+            event_id="russiarunning-bbbbbbbbbbbb",
+            title="100-й Петербургский Марафон. Пушкин — Петербург",
+            city="Санкт-Петербург",
+            region="Санкт-Петербург",
+            starts_at="2027-09-05T00:00:00",
+        )
+
+        deduped = self.service._deduplicate([first, second])
+
+        self.assertEqual(len(deduped), 1)
+
+    def test_edition_prefix_keeps_kids_race_apart(self) -> None:
+        first = make_event(
+            1,
+            source="PushkinRun",
+            event_id="pushkin-run-2-aaaaaaaaaaaa",
+            title="9-Й Царскосельский Марафон",
+            city="Санкт-Петербург",
+            region="Санкт-Петербург",
+            starts_at="2027-05-10T00:00:00",
+        )
+        second = make_event(
+            2,
+            source="PushkinRun",
+            event_id="pushkin-run-3-bbbbbbbbbbbb",
+            title="Детский забег «Царскосельского марафона»",
+            city="Санкт-Петербург",
+            region="Санкт-Петербург",
+            starts_at="2027-05-10T00:00:00",
         )
 
         deduped = self.service._deduplicate([first, second])

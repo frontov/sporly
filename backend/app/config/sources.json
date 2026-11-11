@@ -586,6 +586,20 @@
         "description": ".t-card__descr",
         "image": "meta[itemprop='image']"
       }
+    },
+    {
+      "name": "PushkinRun",
+      "base_url": "https://pushkin-run.ru",
+      "listing_urls": [
+        "https://pushkin-run.ru/"
+      ],
+      "enabled": true,
+      "parser_type": "pushkin_run",
+      "selectors": {
+        "item": "div.t-rec[data-record-type='396']",
+        "title": ".t396__elem[data-elem-type='text']",
+        "link": "a[href]"
+      }
     }
   ]
 }
