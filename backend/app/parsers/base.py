@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import html as html_module
 import json
@@ -182,6 +182,110 @@ class CssDirectoryParser:
             with_path.append(full_url)
         return with_path[0] if with_path else None
 
+    def _extract_registration_from_page(
+        self, soup: BeautifulSoup
+    ) -> tuple[str | None, str | None]:
+        """Detect registration state on an event detail page.
+
+        Sources publish it in very different ways: a status line, an entry
+        button, a claim link or a "registration closes on" sentence. Only
+        explicit markers are trusted so that navigation links like the site's
+        own "Регистрация" account button do not produce false positives.
+        """
+
+        text = " ".join(
+            soup.get_text(" ", strip=True).replace("\xa0", " ").split()
+        )
+        lowered = text.casefold().replace("ё", "е")
+
+        deadline = None
+        deadline_match = re.search(
+            r"(?:регистрац[а-яе]*[^.!?]{0,40}?\sдо|entry is open till"
+            r"|прием заявок до|приём заявок до|заявки принимаются до)"
+            r"\s+(\d{1,2}[./]\d{1,2}[./]\d{2,4}"
+            r"|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля"
+            r"|августа|сентября|октября|ноября|декабря)(?:\s+\d{4})?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if deadline_match:
+            candidate = self._clean_registration_date(deadline_match.group(1))
+            try:
+                parsed_deadline = date_parser.parse(
+                    candidate, dayfirst=True
+                ).date()
+            except (ValueError, OverflowError):
+                parsed_deadline = None
+            # A date in the past usually belongs to a previous edition or a
+            # fee table; using it would incorrectly close a future event.
+            if (
+                parsed_deadline is None
+                or parsed_deadline >= datetime.now().date()
+            ):
+                deadline = f"до {candidate}"
+
+        closed_markers = (
+            "регистрация завершена",
+            "прием заявок завершен",
+            "приём заявок завершён",
+            "прием заявок закрыт",
+            "приём заявок закрыт",
+            "entry is closed",
+            "registration closed",
+            "мест нет",
+        )
+        if any(marker in lowered for marker in closed_markers):
+            return "closed", deadline
+        if re.search(
+            r"регистрац[а-яе]*[^!?\n]{0,120}?(?:закрыта|закрыт|закрыто|закрыты|завершена|завершен|завершено|завершены)\b", lowered
+        ):
+            return "closed", deadline
+        if re.search(r"свободных мест:\s*0\b", lowered):
+            return "closed", deadline
+
+        upcoming_markers = (
+            "открытие регистрации",
+            "entry opens",
+            "registration opens",
+        )
+        if any(marker in lowered for marker in upcoming_markers):
+            return "upcoming", deadline
+        if re.search(
+            r"регистрац[а-яе]*[^!?\n]{0,120}?"
+            r"(?:откроется|не открыта|не открыт|не открыто|начнется|начнётся)",
+            lowered,
+        ):
+            return "upcoming", deadline
+
+        open_markers = (
+            "до конца регистрации",
+            "entry is open",
+            "registration is open",
+        )
+        if any(marker in lowered for marker in open_markers):
+            return "open", deadline
+        if re.search(r"регистрац[а-яе]*[^!?\n]{0,120}?(?:открыта|открыт|открыто|открыты)\b", lowered):
+            return "open", deadline
+        if re.search(r"осталось слотов по текущей цене:\s*[1-9]", lowered):
+            return "open", deadline
+        if soup.select_one('a[href*="/claim/create/"]') is not None:
+            return "open", deadline
+        for link in soup.select("a[href]"):
+            href = link.get("href")
+            label = " ".join(link.get_text(" ", strip=True).split()).casefold()
+            if (
+                isinstance(href, str)
+                and href.strip()
+                and href.strip() != "#"
+                and label in {"зарегистрироваться", "подать заявку"}
+            ):
+                return "open", deadline
+        return None, deadline
+
+    @staticmethod
+    def _clean_registration_date(value: str) -> str:
+        return " ".join(value.replace("\xa0", " ").split()).strip(" ,.")
+
     def _extract_text(self, node: Any, selector: str) -> str | None:
         element = node.select_one(selector)
         if not element:
@@ -305,6 +409,25 @@ class CssDirectoryParser:
         if cleaned.endswith(".0"):
             cleaned = cleaned[:-2]
         return cleaned
+
+    def _normalize_source_specific_distance_label(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        cleaned = re.sub(r"\s+", " ", value).strip(" ,.")
+        if not cleaned:
+            return None
+        lowered = cleaned.casefold()
+        if len(cleaned) > 40:
+            return None
+        if any(token in lowered for token in ("стоимость", "участник", "возраст", "регистрац", "доступн", "слот", "старт ", "награждение")):
+            return None
+        if re.fullmatch(r"[тt]-?\d{1,2}", lowered):
+            return cleaned.upper()
+        if re.fullmatch(r"(онлайн|online|догтрейл|кросс|забег|мтб|гревел|фикс/сингл|велокросс)", lowered):
+            return cleaned
+        if re.fullmatch(r"[а-яёa-z0-9+./ -]{1,30}", lowered) and re.search(r"\d", cleaned):
+            return cleaned
+        return None
 
     def _parse_russian_date(self, raw_value: str) -> str | None:
         months = {
@@ -1160,7 +1283,7 @@ class OrgeoParser(CssDirectoryParser):
     async def enrich_events(
         self, events: list[Event], client: httpx.AsyncClient
     ) -> list[Event]:
-        semaphore = asyncio.Semaphore(8)
+        semaphore = asyncio.Semaphore(16)
         tasks = [
             asyncio.create_task(self._enrich_orgeo_event(event, client, semaphore))
             for event in events
@@ -1343,36 +1466,31 @@ class OrgeoParser(CssDirectoryParser):
         self,
         soup: BeautifulSoup,
     ) -> tuple[str | None, str | None]:
+        status, deadline = self._extract_registration_from_page(soup)
         text = soup.get_text(" ", strip=True)
-        label_text = None
-        label = soup.select_one(".label.label-default")
-        if label is not None:
-            label_text = label.get_text(" ", strip=True)
 
-        haystack = " ".join(part for part in [label_text, text] if part).casefold()
-        status = None
-        if "регистрация закрыта" in haystack:
-            status = "closed"
-        elif "лист ожидания" in haystack:
+        if deadline is None:
+            deadline_match = re.search(
+                r"(?:заявки принимаются до|регистрация закрыта)\s+"
+                r"(\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{2}:\d{2})?)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if deadline_match:
+                deadline = f"до {deadline_match.group(1)}"
+
+        if "лист ожидания" in text.casefold():
             status = "limited"
-        elif (
-            "регистрация откроется" in haystack
-            or "регистрация ещё не открыта" in haystack
-            or "регистрация еще не открыта" in haystack
-            or "открытие регистрации" in haystack
-        ):
-            status = "upcoming"
-        elif "регистрация" in haystack and "закрыта" not in haystack:
-            status = "open"
 
-        deadline = None
-        deadline_match = re.search(
-            r"(?:заявки принимаются до|регистрация закрыта)\s+(\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{2}:\d{2})?)",
-            text,
-            flags=re.IGNORECASE,
+        slots_match = re.search(
+            r"Свободных мест:\s*(\d+)\s*из\s*(\d+)", text
         )
-        if deadline_match:
-            deadline = f"до {deadline_match.group(1)}"
+        if (
+            status == "open"
+            and slots_match
+            and int(slots_match.group(1)) == 0
+        ):
+            status = "closed"
 
         return status, deadline
 
@@ -1575,41 +1693,58 @@ class RussialoppetParser(CssDirectoryParser):
     async def enrich_events(
         self, events: list[Event], client: httpx.AsyncClient
     ) -> list[Event]:
-        enriched: list[Event] = []
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(
+                self._enrich_russialoppet_event(event, client, semaphore)
+            )
+            for event in events
+        ]
+        return list(await asyncio.gather(*tasks))
 
-        for event in events:
-            if event.starts_at and event.date_text and event.city:
-                enriched.append(event)
-                continue
+    async def _enrich_russialoppet_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if (
+            event.starts_at
+            and event.date_text
+            and event.city
+            and event.registration_status
+        ):
+            return event
 
+        async with semaphore:
             try:
                 response = await client.get(str(event.source_url))
                 response.raise_for_status()
             except httpx.HTTPError:
-                enriched.append(event)
-                continue
+                return event
 
-            soup = BeautifulSoup(response.text, "html.parser")
-            date_text = self._extract_detail_date(soup)
-            if not date_text:
-                enriched.append(event)
-                continue
+        soup = BeautifulSoup(response.text, "html.parser")
+        date_text = self._extract_detail_date(soup) or event.date_text
+        registration_status, registration_deadline = (
+            self._extract_registration_from_page(soup)
+        )
 
-            enriched.append(
-                event.model_copy(
-                    update={
-                        "date_text": date_text or event.date_text,
-                        "starts_at": self._normalize_datetime(date_text),
-                        "city": event.city or self._extract_russialoppet_city(soup),
-                        "distance_summary": self._extract_distance_summary_from_text(
-                            soup.get_text(" ", strip=True)
-                        )
-                        or event.distance_summary,
-                    }
+        return event.model_copy(
+            update={
+                "date_text": date_text or event.date_text,
+                "starts_at": self._normalize_datetime(date_text)
+                or event.starts_at,
+                "city": event.city or self._extract_russialoppet_city(soup),
+                "distance_summary": self._extract_distance_summary_from_text(
+                    soup.get_text(" ", strip=True)
                 )
-            )
-
-        return enriched
+                or event.distance_summary,
+                "registration_status": registration_status
+                or event.registration_status,
+                "registration_deadline": registration_deadline
+                or event.registration_deadline,
+            }
+        )
 
     def _find_marathons_link(self, soup: BeautifulSoup, page_url: str) -> Any | None:
         expected_path = re.search(r"/events/\d{4}/?$", page_url)
@@ -3769,7 +3904,7 @@ class OTimeCalendarParser(CssDirectoryParser):
     async def enrich_events(
         self, events: list[Event], client: httpx.AsyncClient
     ) -> list[Event]:
-        semaphore = asyncio.Semaphore(8)
+        semaphore = asyncio.Semaphore(16)
         tasks = [
             asyncio.create_task(self._enrich_otime_event(event, client, semaphore))
             for event in events
@@ -3884,7 +4019,7 @@ class OTimeCalendarParser(CssDirectoryParser):
         client: httpx.AsyncClient,
         semaphore: asyncio.Semaphore,
     ) -> Event:
-        if event.city and event.distance_summary:
+        if event.city and event.distance_summary and event.registration_status:
             return event
 
         async with semaphore:
@@ -4348,25 +4483,6 @@ class MyRaceParser(CssDirectoryParser):
             return " • ".join(values)
 
         return self._extract_myrace_activity_summary(soup)
-
-    def _normalize_source_specific_distance_label(self, value: str | None) -> str | None:
-        if not value:
-            return None
-        cleaned = re.sub(r"\s+", " ", value).strip(" ,.")
-        if not cleaned:
-            return None
-        lowered = cleaned.casefold()
-        if len(cleaned) > 40:
-            return None
-        if any(token in lowered for token in ("стоимость", "участник", "возраст", "регистрац", "доступн", "слот", "старт ", "награждение")):
-            return None
-        if re.fullmatch(r"[тt]-?\d{1,2}", lowered):
-            return cleaned.upper()
-        if re.fullmatch(r"(онлайн|online|догтрейл|кросс|забег|мтб|гревел|фикс/сингл|велокросс)", lowered):
-            return cleaned
-        if re.fullmatch(r"[а-яёa-z0-9+./ -]{1,30}", lowered) and re.search(r"\d", cleaned):
-            return cleaned
-        return None
 
     def _extract_myrace_registration_status(self, soup: BeautifulSoup) -> str | None:
         text = self._extract_optional_text(soup, "a.push-right.right") or self._extract_optional_text(soup, ".registration-status")
@@ -5482,6 +5598,16 @@ class XWatersParser(CssDirectoryParser):
         city, region, venue = self._extract_xwaters_location(location_text or "")
         image_url = self._extract_optional_attr(soup, 'meta[property="og:image"]', "content") or event.image_url
         distance_summary = self._extract_distance_summary_from_text(soup.get_text(" ", strip=True))
+        registration_status, registration_deadline = self._extract_registration_from_page(soup)
+        slots = [
+            int(value)
+            for value in re.findall(
+                r"Осталось слотов по текущей цене:\s*(\d+)",
+                soup.get_text(" ", strip=True),
+            )
+        ]
+        if registration_status == "open" and slots and max(slots) == 0:
+            registration_status = "closed"
 
         return event.model_copy(
             update={
@@ -5494,6 +5620,10 @@ class XWatersParser(CssDirectoryParser):
                 "venue": venue or event.venue,
                 "distance_summary": distance_summary or event.distance_summary,
                 "image_url": image_url,
+                "registration_status": registration_status
+                or event.registration_status,
+                "registration_deadline": registration_deadline
+                or event.registration_deadline,
             }
         )
 
@@ -5594,7 +5724,7 @@ class IronStarParser(CssDirectoryParser):
         client: httpx.AsyncClient,
         semaphore: asyncio.Semaphore,
     ) -> Event:
-        if event.distance_summary:
+        if event.distance_summary and event.registration_status:
             return event
 
         async with semaphore:
@@ -5616,12 +5746,43 @@ class IronStarParser(CssDirectoryParser):
             ),
             str(event.source_url),
         )
+        registration_status, registration_deadline = self._extract_ironstar_registration(
+            soup
+        )
 
         return event.model_copy(
             update={
                 "distance_summary": distance_summary or event.distance_summary,
+                "registration_status": registration_status or event.registration_status,
+                "registration_deadline": registration_deadline
+                or event.registration_deadline,
             }
         )
+
+    def _extract_ironstar_registration(
+        self, soup: BeautifulSoup
+    ) -> tuple[str | None, str | None]:
+        block = soup.select_one(".event-card-buttons-reg")
+        if block is None:
+            return None, None
+
+        text = " ".join(block.get_text(" ", strip=True).split()).casefold()
+        status = None
+        if "до конца регистрации" in text:
+            status = "open"
+        elif "откроется" in text or "скоро" in text:
+            status = "upcoming"
+        elif "закрыта" in text or "завершена" in text or "мест нет" in text:
+            status = "closed"
+
+        deadline = None
+        days_match = re.search(r"осталось\s+(\d+)\s+дн", text)
+        if status == "open" and days_match:
+            deadline = (
+                datetime.now() + timedelta(days=int(days_match.group(1)))
+            ).strftime("%d.%m.%Y")
+            deadline = f"до {deadline}"
+        return status, deadline
 
     def _extract_ironstar_title(self, card: Any) -> str | None:
         raw_title = card.get("title")
@@ -5751,6 +5912,9 @@ class GoldenUltraParser(CssDirectoryParser):
         city = self._extract_goldenultra_city(page_text, page_url)
         image_url = self._extract_goldenultra_image(soup, page_url)
         category = self._infer_goldenultra_category(title, page_url)
+        registration_status, registration_deadline = (
+            self._extract_registration_from_page(soup)
+        )
         stable_hash = hashlib.sha1(page_url.encode("utf-8")).hexdigest()[:12]
 
         return Event(
@@ -5765,6 +5929,8 @@ class GoldenUltraParser(CssDirectoryParser):
             category=category,
             date_text=date_text,
             starts_at=self._normalize_datetime(date_text),
+            registration_status=registration_status,
+            registration_deadline=registration_deadline,
             source_name=self.config.name,
             source_url=page_url,
             image_url=image_url,
@@ -6274,10 +6440,18 @@ class GetRunParser(CssDirectoryParser):
                 return event
 
         soup = BeautifulSoup(response.text, "html.parser")
+        update: dict[str, Any] = {}
         known_url = self._extract_known_registration_url(soup, str(event.source_url))
         if known_url:
-            return event.model_copy(update={"source_url": known_url})
-        return event
+            update["source_url"] = known_url
+        registration_status, registration_deadline = (
+            self._extract_registration_from_page(soup)
+        )
+        if registration_status:
+            update["registration_status"] = registration_status
+        if registration_deadline:
+            update["registration_deadline"] = registration_deadline
+        return event.model_copy(update=update) if update else event
 
 
 class BikeEventsParser(CssDirectoryParser):
@@ -7315,6 +7489,47 @@ class NbcEventsParser(StrengthCalendarParser):
                 )
             )
         return events
+
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_nbc_event(event, client, semaphore))
+            for event in events
+        ]
+        return list(await asyncio.gather(*tasks))
+
+    async def _enrich_nbc_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.registration_status:
+            return event
+
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        registration_status, registration_deadline = (
+            self._extract_registration_from_page(soup)
+        )
+        if not registration_status and not registration_deadline:
+            return event
+        return event.model_copy(
+            update={
+                "registration_status": registration_status
+                or event.registration_status,
+                "registration_deadline": registration_deadline
+                or event.registration_deadline,
+            }
+        )
 
 
 class SpswProgramParser(StrengthCalendarParser):

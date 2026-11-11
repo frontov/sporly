@@ -144,6 +144,18 @@ class CatalogLifecycleTest(unittest.TestCase):
 
         self.assertEqual([event.id for event in filtered], ["event-b"])
 
+    def test_statusless_events_are_enriched_before_known_ones(self) -> None:
+        with_status = make_event(1)
+        with_status.registration_status = "open"
+        without_status = make_event(2)
+
+        selected, remaining = self.service._split_events_for_enrichment(
+            [with_status, without_status], 1
+        )
+
+        self.assertEqual([event.id for event in selected], [without_status.id])
+        self.assertEqual([event.id for event in remaining], [with_status.id])
+
     def test_event_id_drops_listing_index(self) -> None:
         event = make_event(
             0,

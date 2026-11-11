@@ -988,12 +988,14 @@ class CatalogService:
         ]
         return events_to_enrich, remaining_events
 
-    def _enrichment_priority(self, event: Event) -> tuple[int, int]:
+    def _enrichment_priority(self, event: Event) -> tuple[int, int, int]:
         missing_date = event.starts_at is None or not event.date_text
         missing_location = event.city is None
+        missing_status = not event.registration_status
         return (
             0 if missing_date else 1,
             0 if missing_location else 1,
+            0 if missing_status else 1,
         )
 
     async def _load_source_events(
