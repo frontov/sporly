@@ -4038,6 +4038,13 @@ class OTimeCalendarParser(CssDirectoryParser):
             soup.get_text(" ", strip=True)
         )
         registration_status, registration_deadline = self._extract_otime_registration_details(soup)
+        if (
+            registration_status is None
+            and "o-time.ru" in urlparse(str(event.source_url)).netloc
+        ):
+            # O-Time renders the entry button only while registration is open,
+            # so a race page without one is still waiting for entries.
+            registration_status = "upcoming"
 
         return event.model_copy(
             update={
@@ -4135,6 +4142,9 @@ class OTimeCalendarParser(CssDirectoryParser):
         )
         if match:
             deadline = f"до {match.group(1)}"
+
+        if status is None and soup.select_one('a[href*="step1.php"]') is not None:
+            status = "open"
 
         return status, deadline
 

@@ -6,6 +6,7 @@ from app.parsers.base import (
     CssDirectoryParser,
     IronStarParser,
     OrgeoParser,
+    OTimeCalendarParser,
     SourceConfig,
     SourceFieldMap,
 )
@@ -115,6 +116,30 @@ class IronStarRegistrationTest(unittest.TestCase):
 
         self.assertEqual(
             self.parser._extract_ironstar_registration(soup)[0], "closed"
+        )
+
+
+class OTimeRegistrationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.parser = OTimeCalendarParser(
+            _config("O-Time", "https://reg.o-time.ru")
+        )
+
+    def test_entry_button_marks_registration_open(self) -> None:
+        soup = _soup(
+            '<a href="https://reg.o-time.ru/step1.php?ev=0&event=26486">'
+            "Register</a>"
+        )
+
+        self.assertEqual(
+            self.parser._extract_otime_registration_details(soup)[0], "open"
+        )
+
+    def test_page_without_entry_button_has_no_status(self) -> None:
+        soup = _soup("<p>Registration Total participants: 0</p>")
+
+        self.assertEqual(
+            self.parser._extract_otime_registration_details(soup), (None, None)
         )
 
 
