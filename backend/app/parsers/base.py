@@ -5607,7 +5607,9 @@ class XWatersParser(CssDirectoryParser):
             )
         ]
         if registration_status == "open" and slots and max(slots) == 0:
-            registration_status = "closed"
+            # Slots at the current price are exhausted before the next tier
+            # opens, so this is not "registration closed" yet.
+            registration_status = "upcoming"
 
         return event.model_copy(
             update={
