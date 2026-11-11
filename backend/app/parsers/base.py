@@ -7179,6 +7179,71 @@ class RfwfCalendarParser(StrengthCalendarParser):
             )
         return events
 
+    async def enrich_events(
+        self, events: list[Event], client: httpx.AsyncClient
+    ) -> list[Event]:
+        semaphore = asyncio.Semaphore(8)
+        tasks = [
+            asyncio.create_task(self._enrich_rfwf_event(event, client, semaphore))
+            for event in events
+        ]
+        return list(await asyncio.gather(*tasks))
+
+    async def _enrich_rfwf_event(
+        self,
+        event: Event,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> Event:
+        if event.registration_status:
+            return event
+
+        async with semaphore:
+            try:
+                response = await client.get(str(event.source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                return event
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        registration_status, registration_deadline = (
+            self._extract_rfwf_registration(soup)
+        )
+        if not registration_status and not registration_deadline:
+            return event
+        return event.model_copy(
+            update={
+                "registration_status": registration_status
+                or event.registration_status,
+                "registration_deadline": registration_deadline
+                or event.registration_deadline,
+            }
+        )
+
+    def _extract_rfwf_registration(
+        self, soup: BeautifulSoup
+    ) -> tuple[str | None, str | None]:
+        button = soup.select_one(".hero-btn-register")
+        if button is not None:
+            text = " ".join(button.get_text(" ", strip=True).split())
+            deadline_match = re.search(
+                r"Доступно до\s+(\d{1,2}\.\d{1,2}\.\d{4})", text
+            )
+            if deadline_match:
+                deadline = f"до {deadline_match.group(1)}"
+                try:
+                    deadline_date = datetime.strptime(
+                        deadline_match.group(1), "%d.%m.%Y"
+                    ).date()
+                except ValueError:
+                    deadline_date = None
+                if deadline_date is None or deadline_date >= datetime.now().date():
+                    return "open", deadline
+                return "closed", deadline
+            if "зарегистрироваться" in text.casefold():
+                return "open", None
+        return self._extract_registration_from_page(soup)
+
 
 class NapCalendarParser(StrengthCalendarParser):
     """NAP Russia tournament calendar (powerlifting-russia.ru/calendar)."""
