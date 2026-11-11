@@ -4508,6 +4508,8 @@ class RaceTimeParser(CssDirectoryParser):
                     organization=(race.get("organizationName") or "").strip(),
                     sport_type_id=race.get("sportTypeId"),
                     image_url=race.get("racePhotoUrl"),
+                    register_url=race.get("registerUrl"),
+                    post_text=race.get("postText"),
                     page_url=page_url,
                 )
             )
@@ -4565,6 +4567,8 @@ class RaceTimeParser(CssDirectoryParser):
                     organization=(race.get("organizationName") or "").strip(),
                     sport_type_id=race.get("sportTypeId"),
                     image_url=race.get("photoUrl"),
+                    register_url=race.get("registerUrl"),
+                    post_text=race.get("postText"),
                     page_url=page_url,
                 )
             )
@@ -4583,9 +4587,20 @@ class RaceTimeParser(CssDirectoryParser):
         sport_type_id: Any,
         image_url: Any,
         page_url: str,
+        register_url: Any = None,
+        post_text: Any = None,
     ) -> Event:
-        description_parts = [secondary or None, organization or None]
-        description = " • ".join(part for part in description_parts if part) or None
+        summary = " • ".join(
+            part for part in (secondary or None, organization or None) if part
+        ) or None
+        description_detail = None
+        if isinstance(post_text, str) and post_text.strip():
+            description_detail = re.sub(
+                r"\s+", " ", post_text.replace("\xa0", " ")
+            ).strip()
+            if len(description_detail) > 900:
+                description_detail = description_detail[:897].rstrip() + "…"
+        description = description_detail or summary
         category = self._racetime_category(secondary, title, sport_type_id)
         stable_hash = hashlib.sha1(full_link.encode("utf-8")).hexdigest()[:12]
 
@@ -4603,10 +4618,43 @@ class RaceTimeParser(CssDirectoryParser):
             category=category,
             date_text=self._format_racetime_date(date_value),
             starts_at=self._normalize_datetime(date_value),
+            registration_status=self._racetime_registration_status(
+                post_text, register_url
+            ),
+            organizer_name=organization or None,
             source_name=self.config.name,
             source_url=full_link,
             image_url=urljoin(page_url, image_url) if isinstance(image_url, str) and image_url else None,
         )
+
+    def _racetime_registration_status(
+        self, post_text: Any, register_url: Any
+    ) -> str | None:
+        """Infer registration state from the RaceTime API fields.
+
+        ``registerUrl`` is only exposed while the organiser accepts entries;
+        the free-form ``postText`` can override it for closed or upcoming
+        registrations.
+        """
+
+        text = (
+            post_text.replace("ё", "е").casefold()
+            if isinstance(post_text, str)
+            else ""
+        )
+        if re.search(r"регистрац[а-яё]*\s+(?:закрыт|завершен)", text):
+            return "closed"
+        if re.search(
+            r"регистрац[а-яё]*\s+(?:еще\s+)?не\s+открыт"
+            r"|регистрац[а-яё]*\s+откроется",
+            text,
+        ):
+            return "upcoming"
+        if re.search(r"регистрац[а-яё]*\s+открыт", text):
+            return "open"
+        if isinstance(register_url, str) and register_url.strip():
+            return "open"
+        return None
 
     async def enrich_events(
         self, events: list[Event], client: httpx.AsyncClient
