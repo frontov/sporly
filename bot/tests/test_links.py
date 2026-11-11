@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from urllib.parse import parse_qs, urlparse
 
 from app.config import settings
-from app.links import event_click_url, event_token
+from app.links import event_click_url, event_token, share_text, share_url
 
 
 class LinkTest(unittest.TestCase):
@@ -32,3 +33,28 @@ class LinkTest(unittest.TestCase):
             )
         finally:
             settings.public_base_url = previous
+
+    def test_share_text_uses_the_event_title(self) -> None:
+        self.assertEqual(share_text("Ночной забег"), "Ночной забег — Sporly")
+        self.assertEqual(share_text("  Ночной   забег "), "Ночной забег — Sporly")
+        self.assertEqual(share_text(None), "Старт в Sporly")
+        self.assertEqual(share_text("   "), "Старт в Sporly")
+
+    def test_long_share_text_is_truncated(self) -> None:
+        text = share_text("Очень длинное название старта " * 10)
+
+        self.assertTrue(text.endswith("— Sporly"))
+        self.assertLessEqual(len(text), 100 + len(" — Sporly"))
+
+    def test_share_url_carries_title_and_start_token(self) -> None:
+        url = share_url("sporly_bot", "abc123456789", "Ночной забег")
+
+        self.assertIsNotNone(url)
+        query = parse_qs(urlparse(str(url)).query)
+        self.assertEqual(
+            query["url"], ["https://t.me/sporly_bot?start=ev_abc123456789"]
+        )
+        self.assertEqual(query["text"], ["Ночной забег — Sporly"])
+
+    def test_share_url_without_bot_username(self) -> None:
+        self.assertIsNone(share_url("", "abc", "Ночной забег"))

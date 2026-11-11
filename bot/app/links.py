@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from urllib.parse import quote
 
 from app.config import settings
@@ -33,11 +34,22 @@ def share_url(
     if not bot_username:
         return None
     target = f"https://t.me/{bot_username}?start=ev_{token}"
-    text = "Старт в Sporly"
+    text = share_text(title)
     return (
         "https://t.me/share/url"
         f"?url={quote(target, safe='')}&text={quote(text, safe='')}"
     )
+
+
+def share_text(title: str | None, limit: int = 100) -> str:
+    """Human-readable text for a shared event link."""
+
+    normalized = re.sub(r"\s+", " ", title or "").strip()
+    if not normalized:
+        return "Старт в Sporly"
+    if len(normalized) > limit:
+        normalized = normalized[: limit - 1].rstrip() + "…"
+    return f"{normalized} — Sporly"
 
 
 def favorite_click_url(
