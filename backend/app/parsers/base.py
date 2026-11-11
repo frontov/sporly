@@ -7182,7 +7182,7 @@ class RfwfCalendarParser(StrengthCalendarParser):
     async def enrich_events(
         self, events: list[Event], client: httpx.AsyncClient
     ) -> list[Event]:
-        semaphore = asyncio.Semaphore(8)
+        semaphore = asyncio.Semaphore(4)
         tasks = [
             asyncio.create_task(self._enrich_rfwf_event(event, client, semaphore))
             for event in events
@@ -7197,13 +7197,28 @@ class RfwfCalendarParser(StrengthCalendarParser):
     ) -> Event:
         if event.registration_status:
             return event
+        if (
+            event.starts_at
+            and event.starts_at[:10] < datetime.now().date().isoformat()
+        ):
+            # Past events are hidden by default and the source starts throttling
+            # (503) when dozens of its pages are fetched in one refresh.
+            return event
 
         async with semaphore:
-            try:
-                response = await client.get(str(event.source_url))
-                response.raise_for_status()
-            except httpx.HTTPError:
-                return event
+            response = None
+            for attempt in range(2):
+                try:
+                    response = await client.get(str(event.source_url))
+                    response.raise_for_status()
+                    break
+                except httpx.HTTPError:
+                    if attempt == 1:
+                        return event
+                    await asyncio.sleep(0.4)
+
+        if response is None:
+            return event
 
         soup = BeautifulSoup(response.text, "html.parser")
         registration_status, registration_deadline = (
