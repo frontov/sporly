@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -10,11 +10,12 @@ from app.scheduler import (
     _effective_digest_hour_utc,
     _next_digest_time,
     is_quiet_hours,
+    registration_notice_kind,
     reminder_offset,
     seconds_until_quiet_end,
 )
-from app.storage import Subscription
-from app.text import MOSCOW_TZ
+from app.storage import Favorite, Subscription
+from app.text import MOSCOW_TZ, REGISTRATION_END_OFFSET, REGISTRATION_START_OFFSET
 import app.flows as flows
 import app.scheduler as scheduler
 
@@ -33,6 +34,98 @@ class ReminderTest(unittest.TestCase):
 
     def test_after_start_returns_none(self) -> None:
         self.assertEqual(reminder_offset(-1, set()), None)
+
+
+class RegistrationNoticeTest(unittest.TestCase):
+    today = date(2026, 11, 11)
+
+    def make_favorite(self, **overrides: object) -> Favorite:
+        payload: dict[str, object] = {
+            "chat_id": 1,
+            "event_id": "event-1",
+            "title": "Забег",
+            "starts_at": "2026-12-20T00:00:00",
+            "date_text": "20.12.2026",
+            "source_url": "https://example.com/event",
+        }
+        payload.update(overrides)
+        return Favorite(**payload)
+
+    def test_start_notice_is_due_on_open_date(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="upcoming",
+            registration_opens_at="2026-11-11T10:00:00",
+            registration_deadline="2026-12-10T23:59:00",
+            created_at="2026-11-01T10:00:00",
+        )
+
+        self.assertEqual(
+            registration_notice_kind(favorite, today=self.today),
+            REGISTRATION_START_OFFSET,
+        )
+
+    def test_start_notice_is_not_sent_for_new_favorite_after_open(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="open",
+            registration_opens_at="2026-11-01T10:00:00",
+            registration_deadline="2026-12-10T23:59:00",
+            created_at="2026-11-10T10:00:00",
+        )
+
+        self.assertIsNone(registration_notice_kind(favorite, today=self.today))
+
+    def test_start_notice_is_not_repeated(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="open",
+            registration_opens_at="2026-11-01T10:00:00",
+            registration_deadline="2026-12-10T23:59:00",
+            created_at="2026-10-01T10:00:00",
+            reminded_offsets=[REGISTRATION_START_OFFSET],
+        )
+
+        self.assertIsNone(registration_notice_kind(favorite, today=self.today))
+
+    def test_end_notice_is_due_one_day_before_deadline(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="open",
+            registration_deadline="2026-11-12T23:59:00",
+            reminded_offsets=[REGISTRATION_START_OFFSET],
+        )
+
+        self.assertEqual(
+            registration_notice_kind(favorite, today=self.today),
+            REGISTRATION_END_OFFSET,
+        )
+
+    def test_end_notice_is_not_due_earlier(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="open",
+            registration_deadline="2026-11-13T23:59:00",
+            reminded_offsets=[REGISTRATION_START_OFFSET],
+        )
+
+        self.assertIsNone(registration_notice_kind(favorite, today=self.today))
+
+    def test_end_notice_works_on_the_last_day(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="open",
+            registration_deadline="2026-11-11T23:59:00",
+            reminded_offsets=[REGISTRATION_START_OFFSET],
+        )
+
+        self.assertEqual(
+            registration_notice_kind(favorite, today=self.today),
+            REGISTRATION_END_OFFSET,
+        )
+
+    def test_closed_registration_has_no_start_notice(self) -> None:
+        favorite = self.make_favorite(
+            registration_status="closed",
+            registration_opens_at="2026-11-01T10:00:00",
+            created_at="2026-10-01T10:00:00",
+        )
+
+        self.assertIsNone(registration_notice_kind(favorite, today=self.today))
 
 
 class QuietHoursTest(unittest.TestCase):

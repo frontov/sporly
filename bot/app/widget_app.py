@@ -20,7 +20,7 @@ from aiogram import Bot
 
 from app.api_client import Event, EventQuery, api_client, today_iso
 from app.context import database
-from app.formatting import clean_text
+from app.formatting import clean_text, registration_label
 from app.links import event_click_url
 from app.text import countdown, format_date, pluralize
 from app.widgets import (
@@ -423,12 +423,9 @@ async def card_state(
             meta.append(clean_text(event.distance_summary, 50))
         if event.price_from:
             meta.append(clean_text(event.price_from, 40))
-        if event.registration_deadline:
-            meta.append("регистрация " + clean_text(event.registration_deadline, 50))
-        elif event.registration_status == "open":
-            meta.append("регистрация открыта")
-        elif event.registration_status == "closed":
-            meta.append("регистрация закрыта")
+        registration = registration_label(event, 50)
+        if registration:
+            meta.append(registration)
         return {
             "v": "card",
             "c": {

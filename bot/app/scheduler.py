@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import logging
 from html import escape
 
@@ -32,9 +32,12 @@ from app.links import event_click_url
 from app.storage import Favorite, Subscription, event_identity
 from app.text import (
     MOSCOW_TZ,
+    REGISTRATION_END_OFFSET,
+    REGISTRATION_START_OFFSET,
     REMINDER_OFFSETS,
     days_until,
     local_today,
+    parse_date,
 )
 
 
@@ -399,6 +402,9 @@ def _favorite_to_event(favorite: Favorite) -> Event:
         city=favorite.city,
         region=favorite.region,
         category=favorite.category,
+        registration_status=favorite.registration_status,
+        registration_opens_at=favorite.registration_opens_at,
+        registration_deadline=favorite.registration_deadline,
         source_name="Источник",
     )
 
@@ -417,6 +423,135 @@ def reminder_offset(days: int, sent_offsets: set[str]) -> int | None:
         if days <= offset and str(offset) not in sent_offsets:
             return offset
     return None
+
+
+def registration_notice_kind(
+    favorite: Favorite,
+    today: date | None = None,
+) -> str | None:
+    """Return which registration notice is due for a favorite, if any."""
+
+    sent = set(favorite.reminded_offsets)
+    today = today or local_today()
+    deadline_days = days_until(favorite.registration_deadline)
+
+    if (
+        REGISTRATION_START_OFFSET not in sent
+        and favorite.registration_status != "closed"
+        and (opens_at := parse_date(favorite.registration_opens_at)) is not None
+        and opens_at <= today
+        and (deadline_days is None or deadline_days >= 0)
+    ):
+        created_at = parse_date(favorite.created_at)
+        # A favorite added after registration had already opened should not
+        # trigger a stale "registration just started" message.
+        if created_at is None or created_at <= opens_at:
+            return REGISTRATION_START_OFFSET
+
+    if (
+        REGISTRATION_END_OFFSET not in sent
+        and deadline_days is not None
+        and 0 <= deadline_days <= 1
+    ):
+        return REGISTRATION_END_OFFSET
+
+    return None
+
+
+def _registration_notice_line(kind: str, favorite: Favorite) -> str:
+    if kind == REGISTRATION_START_OFFSET:
+        return "🔔 Регистрация открыта"
+    days = days_until(favorite.registration_deadline)
+    if days == 0:
+        return "⏳ Регистрация закрывается сегодня"
+    return "⏳ Регистрация закрывается завтра"
+
+
+async def send_registration_notices(bot: Bot, bot_username: str = "") -> int:
+    # Registration notices are never sent at night.
+    if is_quiet_hours():
+        return 0
+
+    favorites = await database.all_favorites()
+    reminders_cache: dict[int, bool] = {}
+    due_by_chat: dict[int, list[tuple[Favorite, str]]] = {}
+
+    for favorite in favorites:
+        if favorite.chat_id not in reminders_cache:
+            reminders_cache[favorite.chat_id] = await database.reminders_enabled(
+                favorite.chat_id
+            )
+        if not reminders_cache[favorite.chat_id]:
+            continue
+        kind = registration_notice_kind(favorite)
+        if kind is None:
+            continue
+        due_by_chat.setdefault(favorite.chat_id, []).append((favorite, kind))
+
+    sent = 0
+    for chat_id, due in due_by_chat.items():
+        events = [_favorite_to_event(favorite) for favorite, _ in due]
+        tokens = await _event_tokens(events)
+        rows: list[list[InlineKeyboardButton]] = []
+        text_parts: list[str] = ["<b>📋 Регистрация в избранном</b>"]
+        for index, (favorite, kind) in enumerate(due, start=1):
+            text_parts.append(
+                format_favorite(
+                    favorite,
+                    index=index,
+                    bot_username=bot_username,
+                    page=1,
+                )
+                + "\n"
+                + _registration_notice_line(kind, favorite)
+            )
+            token = tokens[favorite.event_id]
+            row = [
+                InlineKeyboardButton(
+                    text=f"✅ {index}", callback_data=f"unfv:{token}"
+                )
+            ]
+            source_url = event_click_url(
+                chat_id, favorite.event_id, favorite.source_url
+            )
+            if source_url and len(source_url) <= 240:
+                row.append(InlineKeyboardButton(text=BUTTON_OPEN, url=source_url))
+            rows.append(row)
+
+        text_parts.append(
+            "💡 «Подробнее →» откроет карточку, ✅ — убрать из избранного."
+        )
+        rows.append(
+            [InlineKeyboardButton(text=BUTTON_INTERESTS, callback_data="menu:sub")]
+        )
+        rows.append(
+            [InlineKeyboardButton(text=BUTTON_HOME, callback_data="menu:home")]
+        )
+
+        try:
+            await bot.send_message(
+                chat_id,
+                "\n\n".join(text_parts),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+                link_preview_options=NO_PREVIEW,
+            )
+            for favorite, kind in due:
+                await database.mark_reminded(
+                    chat_id, favorite.event_id, kind
+                )
+                await database.log_event(
+                    chat_id, "registration_notice_sent", favorite.event_id
+                )
+            await database.log_event(
+                chat_id, "registration_notices_sent", str(len(due))
+            )
+            sent += 1
+        except Exception as error:
+            logger.warning(
+                "Cannot send registration notices to %s: %s", chat_id, error
+            )
+        await asyncio.sleep(0.05)
+    return sent
 
 
 async def send_reminders(bot: Bot, bot_username: str = "") -> int:
@@ -556,6 +691,9 @@ async def reminder_loop(bot: Bot, bot_username: str = "") -> None:
             sent = await send_reminders(bot, bot_username)
             if sent:
                 logger.info("Sent %s reminders", sent)
+            registration_sent = await send_registration_notices(bot, bot_username)
+            if registration_sent:
+                logger.info("Sent %s registration notices", registration_sent)
         except asyncio.CancelledError:
             raise
         except Exception:

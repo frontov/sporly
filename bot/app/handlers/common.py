@@ -102,7 +102,8 @@ HELP_TEXT = (
     "В списке нажмите «Подробнее →» под стартом. Там дата, место, цена,\n"
     "регистрация и кнопки действий.\n\n"
     "<b>3. Сохраните или поделитесь</b>\n"
-    "⭐ «В избранное» — бот напомнит за 7, 3 и 1 день и в день старта.\n"
+    "⭐ «В избранное» — бот напомнит за 7, 3 и 1 день, в день старта, "
+    "а также об открытии и закрытии регистрации.\n"
     "🌐 «Открыть» — сайт организатора и регистрация.\n"
     "📤 «Поделиться» — ссылка на карточку для друзей.\n\n"
     "<b>4. Подпишитесь на новые</b>\n"
@@ -115,7 +116,8 @@ HELP_TEXT = (
     "«⚙️ Ещё» → «🔔 Уведомления» — три независимые настройки:\n"
     "🔔 новые старты по сохранённым фильтрам — раз в день;\n"
     "📬 дайджест ближайших стартов — раз в день утром;\n"
-    "⏰ напоминания об избранном за 7, 3 и 1 день и в день старта.\n"
+    "⏰ напоминания об избранном за 7, 3 и 1 день, в день старта "
+    "и об изменениях регистрации.\n"
     "Ночью уведомления не приходят. Можно включить любую комбинацию.\n\n"
     "<b>7. Выберите интерфейс</b>\n"
     "/app — новый интерфейс с HTML-виджетом: старты, карточка, избранное,\n"
@@ -329,18 +331,6 @@ async def cmd_start(
         and not profile.survey_completed
         and subscription is None
     ):
-        if profile.ui_mode == "widget":
-            from app.widget_app import send_app_widget
-
-            sent_onboarding = await send_app_widget(
-                bot,
-                chat_id,
-                bot_username=bot_username,
-                initial_view="filters",
-            )
-            if sent_onboarding is not None:
-                await _delete_start_message(message)
-                return
         await send_onboarding(bot, chat_id, state)
         await _delete_start_message(message)
         return
@@ -376,7 +366,8 @@ async def cmd_start(
                 bot_username=bot_username,
                 prefix=(
                     "⭐ Добавил в избранное.\n"
-                    "💡 Напомню за 7, 3 и 1 день и в день старта."
+                    "💡 Напомню за 7, 3 и 1 день, в день старта "
+                    "и об изменениях регистрации."
                 ),
             )
         else:
@@ -406,15 +397,6 @@ async def cmd_start(
             )
         await _delete_start_message(message)
     else:
-        if profile.ui_mode == "widget":
-            from app.widget_app import send_app_widget
-
-            sent_app = await send_app_widget(
-                bot, chat_id, bot_username=bot_username
-            )
-            if sent_app is not None:
-                await _delete_start_message(message)
-                return
         sent_home = await send_home(bot, chat_id)
         if sent_home is not None:
             await _delete_start_message(message)

@@ -54,8 +54,12 @@ from app.storage import Subscription
 from app.text import (
     EVENT_COLORS,
     MOSCOW_TZ,
+    REGISTRATION_END_OFFSET,
+    REGISTRATION_START_OFFSET,
     REMINDER_OFFSETS,
     days_until,
+    local_today,
+    parse_date,
     pluralize,
 )
 
@@ -702,7 +706,8 @@ async def show_favorites(
                 "1. Откройте «🔍 Найти старт» или «🔥 Ближайшие».\n"
                 "2. Нажмите «Подробнее →» под стартом.\n"
                 "3. Нажмите «⭐ В избранное».\n\n"
-                "Бот напомнит за 7, 3 и 1 день до старта и в день старта."
+                "Бот напомнит за 7, 3 и 1 день до старта, в день старта, "
+                "а также об открытии и закрытии регистрации."
             ),
             markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -771,7 +776,10 @@ async def show_favorites(
         )
         for index, favorite in enumerate(display_favorites, start=1)
     )
-    text += "\n\nНапомним за 7, 3 и 1 день до старта."
+    text += (
+        "\n\nНапомним за 7, 3 и 1 день до старта, "
+        "а также об открытии и закрытии регистрации."
+    )
     text += "\n" + HINT_TAP_DETAIL
     if total_pages > 1:
         text += "\n" + HINT_LIST_NAV
@@ -909,7 +917,8 @@ async def finish_subscription(
         "🔥 «Смотреть ближайшие» — текущая подборка\n"
         "🔔 «Новые старты по фильтрам» — раз в день одним сообщением\n"
         "📬 «Дайджест» — раз в день утром\n"
-        "⏰ «Напоминания об избранном» — за 7, 3 и 1 день\n"
+        "⏰ «Напоминания об избранном» — за 7, 3 и 1 день до старта, "
+        "в день старта и об изменениях регистрации\n"
         "✏️ «Изменить интересы» — поменять фильтры\n\n"
         "🌙 Ночью уведомления не приходят."
     )
@@ -942,8 +951,9 @@ async def show_notifications(
         "🔔 <b>Новые старты по фильтрам</b> — раз в день одним сообщением, "
         "когда появляются старты под «🎯 Мои интересы».\n"
         "📬 <b>Дайджест</b> — раз в день утром: подборка ближайших стартов.\n"
-        "⏰ <b>Напоминания об избранном</b> — за 7, 3 и 1 день до старта "
-        "и в день старта. Работают отдельно от подписки.\n\n"
+        "⏰ <b>Напоминания об избранном</b> — за 7, 3 и 1 день до старта, "
+        "в день старта, при открытии регистрации и за день до её конца. "
+        "Работают отдельно от подписки.\n\n"
         "🌙 Ночью бот не присылает уведомления.\n\n"
     )
     if subscription is not None:
@@ -1041,7 +1051,8 @@ async def show_subscription(
         "🔥 «Смотреть ближайшие» — показать подборку\n"
         "🔔 новые старты по фильтрам — раз в день одним сообщением\n"
         "📬 дайджест — раз в день утром\n"
-        "⏰ напоминания об избранном — за 7, 3 и 1 день\n"
+        "⏰ напоминания об избранном — за 7, 3 и 1 день, "
+        "в день старта и об изменениях регистрации\n"
         "✏️ изменить — виды спорта и регионы\n"
         "🗑 удалить — отключить подписку, избранное останется\n\n"
         "🌙 Ночью уведомления не приходят."
@@ -1175,6 +1186,17 @@ async def toggle_favorite_by_token(
             for offset in REMINDER_OFFSETS:
                 if offset > days:
                     await database.mark_reminded(chat_id, event.id, str(offset))
+        today = local_today()
+        opens_at = parse_date(event.registration_opens_at)
+        if opens_at is not None and opens_at <= today:
+            await database.mark_reminded(
+                chat_id, event.id, REGISTRATION_START_OFFSET
+            )
+        deadline_days = days_until(event.registration_deadline)
+        if deadline_days is not None and deadline_days < 1:
+            await database.mark_reminded(
+                chat_id, event.id, REGISTRATION_END_OFFSET
+            )
         await database.log_event(chat_id, "favorite_add", event.id)
         return True, event.title
     await database.remove_favorite(chat_id, event.id)

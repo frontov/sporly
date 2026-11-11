@@ -1354,6 +1354,11 @@ a {
   color: #8b3030;
 }
 
+.event-card__trust-chip--upcoming {
+  background: rgba(116, 166, 255, 0.18);
+  color: #2b4f8a;
+}
+
 .event-card__trust-chip--limited {
   background: rgba(255, 197, 92, 0.2);
   color: #8a5a11;

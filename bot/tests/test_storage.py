@@ -129,12 +129,22 @@ class DatabaseTest(unittest.IsolatedAsyncioTestCase):
                 "city": "Москва",
                 "region": "Москва",
                 "category": "Бег",
+                "registration_status": "open",
+                "registration_opens_at": "2026-05-01T10:00:00",
+                "registration_deadline": "2026-05-25T23:59:00",
             },
         )
 
         self.assertTrue(await self.db.is_favorite(1, "myrace-4ab3bb1a6722"))
         favorites = await self.db.favorites(1)
         self.assertEqual(favorites[0].event_id, "myrace-4ab3bb1a6722")
+        self.assertEqual(favorites[0].registration_status, "open")
+        self.assertEqual(
+            favorites[0].registration_opens_at, "2026-05-01T10:00:00"
+        )
+        self.assertEqual(
+            favorites[0].registration_deadline, "2026-05-25T23:59:00"
+        )
 
         self.assertTrue(await self.db.remove_favorite(1, "myrace-4ab3bb1a6722"))
         self.assertEqual(await self.db.favorites(1), [])

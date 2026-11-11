@@ -71,6 +71,7 @@ const REGISTRATION_STATUS_LABELS: Record<
   string,
   { text: string; className: string }
 > = {
+  upcoming: { text: "Регистрация ещё не открылась", className: "event-card__trust-chip--upcoming" },
   open: { text: "Регистрация открыта", className: "event-card__trust-chip--open" },
   closed: { text: "Регистрация закрыта", className: "event-card__trust-chip--closed" },
   limited: { text: "Лист ожидания", className: "event-card__trust-chip--limited" }
@@ -87,10 +88,25 @@ const formatCheckedAt = (value: string | null) => {
   return `Проверено ${days} дн. назад`;
 };
 
+const formatRegistrationStart = (value: string | null) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long"
+  }).format(parsed);
+};
+
 const buildDecisionFacts = (event: EventItem) => {
   const facts: string[] = [];
   if (event.distance_summary) facts.push(event.distance_summary);
-  if (event.registration_deadline) facts.push(event.registration_deadline);
+  if (event.registration_status === "upcoming") {
+    const opensAt = formatRegistrationStart(event.registration_opens_at);
+    if (opensAt) facts.push(`Регистрация с ${opensAt}`);
+  } else if (event.registration_status !== "closed" && event.registration_deadline) {
+    facts.push(event.registration_deadline);
+  }
   return facts.slice(0, 3);
 };
 
@@ -195,7 +211,7 @@ export const EventCard = ({ event, showDetails }: EventCardProps) => {
             </div>
           ) : null}
 
-          {showDetails && registrationChip ? (
+          {registrationChip ? (
             <div className="event-card__trust">
               <span className={`event-card__trust-chip ${registrationChip.className}`}>
                 {registrationChip.text}

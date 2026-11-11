@@ -121,6 +121,9 @@ class Favorite:
     city: str | None = None
     region: str | None = None
     category: str | None = None
+    registration_status: str | None = None
+    registration_opens_at: str | None = None
+    registration_deadline: str | None = None
     reminded_offsets: list[str] = field(default_factory=list)
     created_at: str | None = None
 
@@ -289,6 +292,9 @@ class Database:
                     city TEXT,
                     region TEXT,
                     category TEXT,
+                    registration_status TEXT,
+                    registration_opens_at TEXT,
+                    registration_deadline TEXT,
                     reminded_offsets TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (chat_id, event_id)
@@ -369,6 +375,19 @@ class Database:
                 connection.execute(
                     "ALTER TABLE users ADD COLUMN reminders_enabled INTEGER NOT NULL DEFAULT 1"
                 )
+            favorite_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(favorites)").fetchall()
+            }
+            for column, definition in (
+                ("registration_status", "TEXT"),
+                ("registration_opens_at", "TEXT"),
+                ("registration_deadline", "TEXT"),
+            ):
+                if column not in favorite_columns:
+                    connection.execute(
+                        f"ALTER TABLE favorites ADD COLUMN {column} {definition}"
+                    )
             self._migrate_legacy_json(connection)
             self._migrate_event_ids(connection)
 
@@ -964,8 +983,10 @@ class Database:
                 """
                 INSERT INTO favorites
                     (chat_id, event_id, title, starts_at, date_text, source_url,
-                     city, region, category, reminded_offsets, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
+                     city, region, category, registration_status,
+                     registration_opens_at, registration_deadline,
+                     reminded_offsets, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
                 ON CONFLICT(chat_id, event_id) DO UPDATE SET
                     title = excluded.title,
                     starts_at = excluded.starts_at,
@@ -973,7 +994,10 @@ class Database:
                     source_url = excluded.source_url,
                     city = excluded.city,
                     region = excluded.region,
-                    category = excluded.category
+                    category = excluded.category,
+                    registration_status = excluded.registration_status,
+                    registration_opens_at = excluded.registration_opens_at,
+                    registration_deadline = excluded.registration_deadline
                 """,
                 (
                     chat_id,
@@ -985,6 +1009,9 @@ class Database:
                     event.get("city"),
                     event.get("region"),
                     event.get("category"),
+                    event.get("registration_status"),
+                    event.get("registration_opens_at"),
+                    event.get("registration_deadline"),
                     utc_now(),
                 ),
             )
@@ -1048,6 +1075,9 @@ class Database:
             city=row["city"],
             region=row["region"],
             category=row["category"],
+            registration_status=row["registration_status"],
+            registration_opens_at=row["registration_opens_at"],
+            registration_deadline=row["registration_deadline"],
             reminded_offsets=_loads_list(row["reminded_offsets"]),
             created_at=row["created_at"],
         )

@@ -13,6 +13,7 @@ type FiltersPanelProps = {
 };
 
 const REGISTRATION_OPTIONS = [
+  { value: "upcoming", label: "Ещё не открылась" },
   { value: "open", label: "Открыта" },
   { value: "closed", label: "Закрыта" },
   { value: "limited", label: "Лист ожидания" }

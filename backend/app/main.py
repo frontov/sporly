@@ -204,6 +204,8 @@ def _schema_availability(registration_status: str | None) -> str | None:
         return "https://schema.org/InStock"
     if registration_status == "limited":
         return "https://schema.org/LimitedAvailability"
+    if registration_status == "upcoming":
+        return "https://schema.org/PreOrder"
     if registration_status == "closed":
         return "https://schema.org/SoldOut"
     return None

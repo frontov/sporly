@@ -23,6 +23,7 @@ class Event(BaseModel):
     kids_available: bool | None = None
     organizer_name: str | None = None
     price_from: str | None = None
+    registration_opens_at: str | None = None
     registration_deadline: str | None = None
     slots_status: str | None = None
     surface_type: str | None = None

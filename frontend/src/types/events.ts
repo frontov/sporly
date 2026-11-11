@@ -20,6 +20,7 @@ export type EventItem = {
   kids_available: boolean | null;
   organizer_name: string | null;
   price_from: string | null;
+  registration_opens_at: string | null;
   registration_deadline: string | null;
   slots_status: string | null;
   surface_type: string | null;

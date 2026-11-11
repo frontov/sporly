@@ -38,18 +38,34 @@ def event_when(event: Event) -> str:
     return f"{when} · {relative}" if relative else when
 
 
+def registration_label(event: Event, limit: int = 60) -> str | None:
+    status = event.registration_status
+    if status == "closed":
+        return "регистрация закрыта"
+    if status == "upcoming":
+        if event.registration_opens_at:
+            opens_at = format_date(event.registration_opens_at, None)
+            if opens_at and opens_at != "дата уточняется":
+                return f"регистрация с {opens_at}"
+        return "регистрация ещё не открылась"
+    if event.registration_deadline:
+        return "регистрация " + clean_text(event.registration_deadline, limit)
+    if status == "open":
+        return "регистрация открыта"
+    if status == "limited":
+        return "лист ожидания"
+    return None
+
+
 def event_facts(event: Event) -> list[str]:
     facts: list[str] = []
     if event.distance_summary:
         facts.append(clean_text(event.distance_summary, 80))
     if event.price_from:
         facts.append(clean_text(event.price_from, 40))
-    if event.registration_deadline:
-        facts.append("регистрация " + clean_text(event.registration_deadline, 60))
-    elif event.registration_status == "open":
-        facts.append("регистрация открыта")
-    elif event.registration_status == "closed":
-        facts.append("регистрация закрыта")
+    registration = registration_label(event, 60)
+    if registration:
+        facts.append(registration)
     return facts
 
 
@@ -95,12 +111,9 @@ def format_event_card(event: Event) -> str:
     money: list[str] = []
     if event.price_from:
         money.append(clean_text(event.price_from, 40))
-    if event.registration_deadline:
-        money.append("регистрация " + clean_text(event.registration_deadline, 50))
-    elif event.registration_status == "open":
-        money.append("регистрация открыта")
-    elif event.registration_status == "closed":
-        money.append("регистрация закрыта")
+    registration = registration_label(event, 50)
+    if registration:
+        money.append(registration)
     if money:
         lines.append("💳 " + escape(" · ".join(money)))
 
@@ -126,7 +139,10 @@ def format_favorite_card(favorite: Favorite) -> str:
     lines.append(f"📅 {escape(when + (f' · {relative}' if relative else ''))}")
     if favorite.location:
         lines.append(f"📍 {escape(clean_text(favorite.location, 90))}")
-    lines.append("\n🔔 Напомним за 7, 3 и 1 день до старта.")
+    lines.append(
+        "\n🔔 Напомним за 7, 3 и 1 день до старта, "
+        "а также об открытии и закрытии регистрации."
+    )
     return "\n".join(lines)
 
 
@@ -295,12 +311,9 @@ def format_event_details(event: Event, marker: str = "") -> str:
     money: list[str] = []
     if event.price_from:
         money.append(clean_text(event.price_from, 50))
-    if event.registration_deadline:
-        money.append("регистрация " + clean_text(event.registration_deadline, 60))
-    elif event.registration_status == "open":
-        money.append("регистрация открыта")
-    elif event.registration_status == "closed":
-        money.append("регистрация закрыта")
+    registration = registration_label(event, 60)
+    if registration:
+        money.append(registration)
     if money:
         lines.append("💳 " + escape(" · ".join(money)))
 

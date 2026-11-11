@@ -66,6 +66,27 @@ from app.settings import settings
 logger = logging.getLogger(__name__)
 
 
+REGISTRATION_MONTHS: dict[str, int] = {
+    "января": 1,
+    "февраля": 2,
+    "марта": 3,
+    "апреля": 4,
+    "мая": 5,
+    "июня": 6,
+    "июля": 7,
+    "августа": 8,
+    "сентября": 9,
+    "октября": 10,
+    "ноября": 11,
+    "декабря": 12,
+}
+
+REGISTRATION_DATE_TOKEN = (
+    r"(\d{1,2}[./]\d{1,2}[./]\d{2,4}"
+    r"|\d{1,2}\s+[а-яё]+(?:\s+\d{4})?)"
+)
+
+
 # Events from the combined "Ориентирование и туризм" source category are
 # split by title: hiking, climbing, tourism and Nordic walking go to
 # "Разное", the rest stays in "Ориентирование".
@@ -839,7 +860,9 @@ class CatalogService:
         elif self._is_cache_stale():
             self._ensure_background_refresh()
         active_events = [
-            event for event in self._cache if event.status != "inactive"
+            self._with_current_registration_status(event)
+            for event in self._cache
+            if event.status != "inactive"
         ]
         return self._apply_sort(
             self._apply_filters(active_events, filters), filters
@@ -1949,6 +1972,9 @@ class CatalogService:
                 event.category,
                 event.description,
                 event.image_url,
+                event.registration_status,
+                event.registration_opens_at,
+                event.registration_deadline,
             )
             if value
         )
@@ -1962,6 +1988,14 @@ class CatalogService:
     def _normalize_event(self, event: Event) -> Event:
         normalized_region = self._infer_region(event.city, event.region, event.venue, event.title)
         series_slug, series_name = self._detect_series(event)
+        registration_opens_at = (
+            event.registration_opens_at or self._extract_registration_opens_at(event)
+        )
+        registration_status = self._resolve_registration_status(
+            event,
+            event.registration_status or self._detect_registration_status(event),
+            opens_at_value=registration_opens_at,
+        )
         return event.model_copy(
             update={
                 # The parser-level id used to contain the row index. That made
@@ -1979,7 +2013,8 @@ class CatalogService:
                 "series_name": series_name,
                 "source_label": event.source_label or self._build_source_label(event),
                 "source_type": event.source_type or self._detect_source_type(event),
-                "registration_status": event.registration_status or self._detect_registration_status(event),
+                "registration_status": registration_status,
+                "registration_opens_at": registration_opens_at,
                 "distance_summary": event.distance_summary or self._extract_distance_summary(event),
                 "participation_format": event.participation_format or self._detect_participation_format(event),
                 "kids_available": event.kids_available if event.kids_available is not None else self._detect_kids_available(event),
@@ -2057,7 +2092,7 @@ class CatalogService:
             return "registration"
         return "official"
 
-    def _detect_registration_status(self, event: Event) -> str | None:
+    def _detect_registration_status(self, event: Event, now: datetime | None = None) -> str | None:
         haystack = " ".join(
             part
             for part in (
@@ -2076,6 +2111,26 @@ class CatalogService:
             "слоты законч",
             "регистрация завершена",
             "заявки не принимаются",
+            "регистрация недоступна",
+        )
+        upcoming_markers = (
+            "регистрация еще не открыта",
+            "регистрация ещё не открыта",
+            "регистрация не открыта",
+            "регистрация скоро откроется",
+            "регистрация откроется",
+            "регистрация начнется",
+            "регистрация начнётся",
+            "открытие регистрации",
+            "скоро открытие",
+            "прием заявок откроется",
+            "приём заявок откроется",
+            "заявка откроется",
+            "заявки откроются",
+            "registration opens",
+            "registration not open",
+            "not yet open",
+            "coming soon",
         )
         open_markers = (
             "регистрация открыта",
@@ -2093,11 +2148,201 @@ class CatalogService:
 
         if any(marker in haystack for marker in closed_markers):
             return "closed"
+
+        window_status = self._registration_window_status(event, now=now)
+        if window_status:
+            return window_status
+
         if any(marker in haystack for marker in waitlist_markers):
             return "limited"
+        if any(marker in haystack for marker in upcoming_markers):
+            return "upcoming"
         if any(marker in haystack for marker in open_markers):
             return "open"
         return None
+
+    def _with_current_registration_status(self, event: Event) -> Event:
+        status = self._resolve_registration_status(event, event.registration_status)
+        if status == event.registration_status:
+            return event
+        return event.model_copy(update={"registration_status": status})
+
+    def _resolve_registration_status(
+        self,
+        event: Event,
+        status: str | None,
+        now: datetime | None = None,
+        opens_at_value: str | None = None,
+    ) -> str | None:
+        now = now or datetime.now()
+        base_status = (status or "").casefold() or None
+        opens_at = self._parse_registration_datetime(
+            opens_at_value or event.registration_opens_at
+        )
+        deadline = self._parse_registration_datetime(
+            event.registration_deadline, end_of_day=True
+        )
+
+        if base_status == "closed":
+            return "closed"
+        if deadline is not None and now > deadline:
+            return "closed"
+        if opens_at is not None and now < opens_at:
+            return "upcoming"
+        if base_status == "upcoming":
+            if opens_at is not None:
+                return "open"
+            if deadline is None and self._event_already_started(event, now):
+                return "closed"
+            return "upcoming"
+        if base_status in {"open", "limited"}:
+            if deadline is None and self._event_already_started(event, now):
+                return "closed"
+            return base_status
+        if deadline is not None:
+            return "open"
+        if opens_at is not None:
+            return "open"
+        window_status = self._registration_window_status(event, now=now)
+        if window_status:
+            return window_status
+        return base_status
+
+    def _event_already_started(self, event: Event, now: datetime) -> bool:
+        starts_at = _parse_iso_datetime(event.starts_at)
+        return starts_at is not None and now.date() > starts_at.date()
+
+    def _registration_window_status(
+        self,
+        event: Event,
+        now: datetime | None = None,
+    ) -> str | None:
+        start, end, _ = self._match_registration_window(event)
+        if start is None and end is None:
+            return None
+        now = now or datetime.now()
+        if start is not None and now < start:
+            return "upcoming"
+        if end is not None and now > end:
+            return "closed"
+        if end is not None:
+            return "open"
+        return None
+
+    def _match_registration_window(
+        self,
+        event: Event,
+    ) -> tuple[datetime | None, datetime | None, str | None]:
+        text = " ".join(
+            part for part in (event.title, event.description) if part
+        )
+        if not text:
+            return None, None, None
+
+        match = re.search(
+            r"(?:регистрац[а-яё]*|при[её]м\s+заявок|заявк[а-яё]*)"
+            r"[^.!?\n]{0,30}?\s+с\s+" + REGISTRATION_DATE_TOKEN +
+            r"\s+(?:по|до)\s+" + REGISTRATION_DATE_TOKEN,
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None, None, None
+
+        start = self._parse_registration_datetime(match.group(1))
+        end = self._parse_registration_datetime(match.group(2), end_of_day=True)
+        if start is None and end is None:
+            return None, None, None
+        return start, end, match.group(2)
+
+    def _extract_registration_opens_at(self, event: Event) -> str | None:
+        window_start, _, _ = self._match_registration_window(event)
+        if window_start is not None:
+            return window_start.isoformat()
+
+        text = " ".join(
+            part for part in (event.title, event.description) if part
+        )
+        if not text:
+            return None
+
+        match = re.search(
+            r"(?:регистрац[а-яё]*|при[её]м\s+заявок|заявк[а-яё]*)"
+            r"[^.!?\n]{0,40}?"
+            r"(?:откро[а-яё]*|открытие|начн[а-яё]*|старту[а-яё]*)"
+            r"[^.!?\n]{0,30}?" + REGISTRATION_DATE_TOKEN,
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        opens_at = self._parse_registration_datetime(match.group(1))
+        return opens_at.isoformat() if opens_at is not None else None
+
+    def _parse_registration_datetime(
+        self,
+        value: str | None,
+        *,
+        end_of_day: bool = False,
+    ) -> datetime | None:
+        if not value:
+            return None
+
+        text = re.sub(
+            r"\s+", " ", value.replace("\xa0", " ").replace("ё", "е")
+        ).strip().casefold()
+        if not text:
+            return None
+
+        iso_candidate = text.removeprefix("до ").strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:[t ]\d{2}:\d{2}(?::\d{2})?)?", iso_candidate):
+            try:
+                parsed = datetime.fromisoformat(iso_candidate.replace(" ", "T"))
+            except ValueError:
+                parsed = None
+            if parsed is not None:
+                return parsed
+
+        text = re.sub(r"^(?:до|с|по)\s+", "", text).strip()
+        has_time = False
+
+        dot_match = re.search(
+            r"(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{2,4}))?"
+            r"(?:\s+(\d{1,2}):(\d{2}))?",
+            text,
+        )
+        if dot_match:
+            day = int(dot_match.group(1))
+            month = int(dot_match.group(2))
+            year_raw = dot_match.group(3)
+            year = int(year_raw) if year_raw else datetime.now().year
+            if year < 100:
+                year += 2000
+            hour = int(dot_match.group(4)) if dot_match.group(4) else 0
+            minute = int(dot_match.group(5)) if dot_match.group(5) else 0
+            has_time = dot_match.group(4) is not None
+        else:
+            month_match = re.search(
+                r"(\d{1,2})\s+([а-я]+)(?:\s+(\d{4}))?"
+                r"(?:\s+(\d{1,2}):(\d{2}))?",
+                text,
+            )
+            month = REGISTRATION_MONTHS.get(month_match.group(2)) if month_match else None
+            if month_match is None or month is None:
+                return None
+            day = int(month_match.group(1))
+            year = int(month_match.group(3)) if month_match.group(3) else datetime.now().year
+            hour = int(month_match.group(4)) if month_match.group(4) else 0
+            minute = int(month_match.group(5)) if month_match.group(5) else 0
+            has_time = month_match.group(4) is not None
+
+        if end_of_day and not has_time:
+            hour, minute = 23, 59
+        try:
+            return datetime(year, month, day, hour, minute)
+        except ValueError:
+            return None
+
 
     def _extract_distance_summary(self, event: Event) -> str | None:
         text = " ".join(
@@ -2240,6 +2485,10 @@ class CatalogService:
         )
         if not text:
             return None
+
+        _, window_end, window_end_raw = self._match_registration_window(event)
+        if window_end is not None and window_end_raw:
+            return f"до {window_end_raw}"
 
         numeric_match = re.search(
             r"(?:до|deadline|регистрация до)\s+(\d{1,2}[./]\d{1,2}[./]\d{2,4})",

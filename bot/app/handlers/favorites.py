@@ -78,7 +78,7 @@ async def add_favorite(
     await callback.answer(
         "Уже в избранном"
         if already
-        else "⭐ Добавлено. Напомним за 7, 3 и 1 день."
+        else "⭐ Добавлено. Напомним за 7, 3 и 1 день и об изменениях регистрации."
     )
     if callback.message is not None:
         markup = _toggle_markup(callback.message.reply_markup, token, active=True)

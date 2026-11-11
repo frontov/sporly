@@ -901,6 +901,13 @@ class RegPlaceParser(CssDirectoryParser):
             normalized = cta.casefold()
             if "закрыт" in normalized:
                 status = "closed"
+            elif (
+                "откроется" in normalized
+                or "еще не открыта" in normalized
+                or "ещё не открыта" in normalized
+                or "скоро" in normalized
+            ):
+                status = "upcoming"
             elif "зарегистр" in normalized:
                 status = "open"
 
@@ -1335,6 +1342,13 @@ class OrgeoParser(CssDirectoryParser):
             status = "closed"
         elif "лист ожидания" in haystack:
             status = "limited"
+        elif (
+            "регистрация откроется" in haystack
+            or "регистрация ещё не открыта" in haystack
+            or "регистрация еще не открыта" in haystack
+            or "открытие регистрации" in haystack
+        ):
+            status = "upcoming"
         elif "регистрация" in haystack and "закрыта" not in haystack:
             status = "open"
 
@@ -2241,7 +2255,9 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
         source_url = f"https://reg.russiarunning.com/event/{code}"
         description = self._build_russiarunning_description(item)
         organizer_name = item.get("organizerName")
-        registration_status, registration_deadline = self._extract_russiarunning_registration_details(item)
+        registration_status, registration_opens_at, registration_deadline = (
+            self._extract_russiarunning_registration_details(item)
+        )
         distance_summary = self._extract_russiarunning_distance_summary(item) or self._extract_distance_summary_from_text(
             " ".join(
                 part
@@ -2261,6 +2277,7 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
             description=description,
             organizer_name=organizer_name.strip() if isinstance(organizer_name, str) and organizer_name.strip() else None,
             registration_status=registration_status,
+            registration_opens_at=registration_opens_at,
             registration_deadline=registration_deadline,
             distance_summary=distance_summary,
             city=city,
@@ -2419,12 +2436,13 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
     def _extract_russiarunning_registration_details(
         self,
         item: dict[str, Any],
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None]:
         race_items = item.get("raceItems")
         if not isinstance(race_items, list) or not race_items:
-            return None, None
+            return None, None, None
 
         statuses: list[str] = []
+        open_dates: list[str] = []
         deadlines: list[str] = []
 
         for race_item in race_items:
@@ -2433,24 +2451,23 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
 
             registration_state = race_item.get("registrationDateState")
             disable_registration = race_item.get("disableRegistration")
-            available_count = race_item.get("availableRegistrationsCount")
 
             status = None
             if disable_registration is True:
                 status = "closed"
-            elif registration_state == 3:
+            elif registration_state == 2:
                 status = "open"
-            elif registration_state in {1, 2}:
-                status = "limited"
-
-            if isinstance(available_count, int):
-                if available_count <= 0:
-                    status = "closed"
-                elif available_count < 10 and status == "open":
-                    status = "limited"
+            elif registration_state == 1:
+                status = "upcoming"
+            elif registration_state == 3:
+                status = "closed"
 
             if status:
                 statuses.append(status)
+
+            open_date = race_item.get("registrationOpenDate")
+            if isinstance(open_date, str) and open_date.strip():
+                open_dates.append(open_date.strip())
 
             close_date = race_item.get("registrationCloseDate")
             if isinstance(close_date, str) and close_date.strip():
@@ -2463,14 +2480,20 @@ class RussiaRunningSeriesParser(CssDirectoryParser):
             registration_status = "open"
         elif "limited" in statuses:
             registration_status = "limited"
+        elif "upcoming" in statuses:
+            registration_status = "upcoming"
         elif "closed" in statuses:
             registration_status = "closed"
+
+        registration_opens_at = None
+        if open_dates:
+            registration_opens_at = min(open_dates)
 
         registration_deadline = None
         if deadlines:
             registration_deadline = sorted(deadlines, key=len)[0]
 
-        return registration_status, registration_deadline
+        return registration_status, registration_opens_at, registration_deadline
 
     def _extract_russiarunning_distance_summary(self, item: dict[str, Any]) -> str | None:
         race_items = item.get("raceItems")
@@ -3170,6 +3193,13 @@ class SwimcupParser(CssDirectoryParser):
 
         closed_markers = ("регистрация закрыта", "мест нет", "слоты законч", "sold out")
         waitlist_markers = ("лист ожидания", "waiting list", "предзапись")
+        upcoming_markers = (
+            "регистрация откроется",
+            "регистрация ещё не открыта",
+            "регистрация еще не открыта",
+            "открытие регистрации",
+            "скоро открытие",
+        )
         open_markers = ("зарегистрироваться", "регистрация на соревнования", "регистрация до")
 
         status = None
@@ -3177,6 +3207,8 @@ class SwimcupParser(CssDirectoryParser):
             status = "closed"
         elif any(marker in normalized for marker in waitlist_markers):
             status = "limited"
+        elif any(marker in normalized for marker in upcoming_markers):
+            status = "upcoming"
         elif soup.select_one(".reg a.file[href]") and any(marker in normalized for marker in open_markers):
             status = "open"
 
@@ -3605,8 +3637,14 @@ class OTimeCalendarParser(CssDirectoryParser):
         status = None
         if "entry is open" in normalized or "регистрация открыта" in normalized:
             status = "open"
-        elif "заявка откроется" in normalized or "opens" in normalized:
-            status = "limited"
+        elif (
+            "заявка откроется" in normalized
+            or "регистрация откроется" in normalized
+            or "регистрация ещё не открыта" in normalized
+            or "регистрация еще не открыта" in normalized
+            or "opens" in normalized
+        ):
+            status = "upcoming"
         elif "закрыта" in normalized or "entry is closed" in normalized:
             status = "closed"
 
@@ -3993,6 +4031,8 @@ class MyRaceParser(CssDirectoryParser):
         normalized = text.casefold()
         if "закрыт" in normalized:
             return "closed"
+        if "откроется" in normalized or "не открыта" in normalized or "скоро" in normalized:
+            return "upcoming"
         if "открыт" in normalized:
             return "open"
         if "ожидания" in normalized:
@@ -4598,7 +4638,7 @@ class SportidentParser(CssDirectoryParser):
                         return "open", deadline
                     if now > datetime.fromisoformat(end_dt):
                         return "closed", deadline
-                    return None, deadline
+                    return "upcoming", deadline
                 except ValueError:
                     pass
 
@@ -4615,7 +4655,7 @@ class SportidentParser(CssDirectoryParser):
                     return "open", deadline
             except ValueError:
                 pass
-            return None, deadline
+            return "upcoming", deadline
 
         if "?id=" in str(soup) and "заявиться" in normalized:
             return "open", deadline
