@@ -144,18 +144,21 @@ class ApiClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def get_events(self, query: EventQuery) -> EventsPage:
+    async def get_events(
+        self, query: EventQuery, *, use_cache: bool = True
+    ) -> EventsPage:
         key = query.cache_key()
         cached = self._cache.get(key)
         now = time.monotonic()
-        if cached is not None and cached[0] > now:
+        if use_cache and cached is not None and cached[0] > now:
             return cached[1]
 
         path = "/api/events/featured" if query.featured else "/api/events"
         response = await self._client.get(path, params=query.params())
         response.raise_for_status()
         page = EventsPage.model_validate(response.json())
-        self._cache[key] = (now + settings.api_cache_ttl_seconds, page)
+        if use_cache:
+            self._cache[key] = (now + settings.api_cache_ttl_seconds, page)
 
         # Keep the cache bounded: it is only a short-lived helper for the
         # notification fan-out, not a second source of truth.
@@ -166,7 +169,9 @@ class ApiClient:
                 self._cache.pop(stale_key, None)
         return page
 
-    async def get_events_by_ids(self, event_ids: list[str]) -> list[Event]:
+    async def get_events_by_ids(
+        self, event_ids: list[str], *, use_cache: bool = True
+    ) -> list[Event]:
         """Load the current catalog state for a set of favorite events."""
 
         unique_ids = list(dict.fromkeys(
@@ -183,7 +188,8 @@ class ApiClient:
                     page=1,
                     page_size=len(chunk),
                     sort_by="date_asc",
-                )
+                ),
+                use_cache=use_cache,
             )
             events.extend(page.items)
         return events

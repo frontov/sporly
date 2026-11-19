@@ -522,7 +522,8 @@ async def _refresh_favorite_states(
 
     try:
         events = await api_client.get_events_by_ids(
-            [favorite.event_id for favorite in favorites]
+            [favorite.event_id for favorite in favorites],
+            use_cache=False,
         )
     except Exception as error:
         logger.warning("Cannot refresh favorites from the catalog: %s", error)

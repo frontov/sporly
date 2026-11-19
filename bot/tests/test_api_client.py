@@ -72,6 +72,21 @@ class ApiClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen[0], event_ids[:60])
         self.assertEqual(seen[1], event_ids[60:])
 
+    async def test_fresh_ids_bypass_the_short_lived_cache(self) -> None:
+        calls: list[int] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(1)
+            return httpx.Response(200, json=EMPTY_PAGE)
+
+        self._mock(handler)
+        await self.api.get_events_by_ids(["id-1"])
+        await self.api.get_events_by_ids(["id-1"])
+        await self.api.get_events_by_ids(["id-1"], use_cache=False)
+        await self.api.get_events_by_ids(["id-1"], use_cache=False)
+
+        self.assertEqual(len(calls), 3)
+
     async def test_admin_requests_send_the_admin_token(self) -> None:
         seen: dict[str, object] = {}
         original = settings.admin_token
