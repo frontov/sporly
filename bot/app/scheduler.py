@@ -443,7 +443,8 @@ def registration_notice_kind(
 
     sent = set(favorite.reminded_offsets)
     today = today or local_today()
-    deadline_days = days_until(favorite.registration_deadline)
+    deadline = parse_date(favorite.registration_deadline)
+    deadline_days = (deadline - today).days if deadline is not None else None
     status = (favorite.registration_status or "").casefold()
 
     if (
@@ -562,27 +563,54 @@ async def _refresh_favorite_states(
 
 
 async def _persist_favorite_states(
-    chat_id: int, favorites: list[Favorite]
+    chat_id: int, favorites: list[tuple[Favorite, Favorite]]
 ) -> None:
-    for favorite in favorites:
+    """Store refreshed snapshots, but only where something actually changed.
+
+    This runs on every registration poll, so writing unchanged rows would mean
+    thousands of no-op updates per favorite per day.
+    """
+
+    for current, stored in favorites:
+        if not _favorite_snapshot_changed(current, stored):
+            continue
         try:
             await database.refresh_favorite(
-                chat_id, _favorite_payload(favorite)
+                chat_id, _favorite_payload(current)
             )
         except Exception as error:
             logger.warning(
                 "Cannot refresh favorite %s/%s: %s",
                 chat_id,
-                favorite.event_id,
+                current.event_id,
                 error,
             )
 
 
-async def send_registration_notices(bot: Bot, bot_username: str = "") -> int:
-    # Registration notices are never sent at night.
-    if is_quiet_hours():
-        return 0
+_FAVORITE_SNAPSHOT_FIELDS = (
+    "title",
+    "starts_at",
+    "date_text",
+    "source_url",
+    "city",
+    "region",
+    "category",
+    "registration_status",
+    "registration_opens_at",
+    "registration_deadline",
+)
 
+
+def _favorite_snapshot_changed(current: Favorite, stored: Favorite) -> bool:
+    return any(
+        getattr(current, field) != getattr(stored, field)
+        for field in _FAVORITE_SNAPSHOT_FIELDS
+    )
+
+
+async def send_registration_notices(bot: Bot, bot_username: str = "") -> int:
+    # Registration openings are time-sensitive and are delivered around the
+    # clock, even during quiet hours.
     favorites = await database.all_favorites()
     if not favorites:
         return 0
@@ -593,7 +621,7 @@ async def send_registration_notices(bot: Bot, bot_username: str = "") -> int:
 
     reminders_cache: dict[int, bool] = {}
     due_by_chat: dict[int, list[tuple[Favorite, str]]] = {}
-    chats: dict[int, list[Favorite]] = {}
+    chats: dict[int, list[tuple[Favorite, Favorite]]] = {}
 
     for favorite in favorites:
         if favorite.chat_id not in reminders_cache:
@@ -603,7 +631,7 @@ async def send_registration_notices(bot: Bot, bot_username: str = "") -> int:
         current = refreshed.get(
             (favorite.chat_id, favorite.event_id), favorite
         )
-        chats.setdefault(favorite.chat_id, []).append(current)
+        chats.setdefault(favorite.chat_id, []).append((current, favorite))
         if not reminders_cache[favorite.chat_id]:
             continue
         kind = registration_notice_kind(
@@ -825,11 +853,31 @@ async def reminder_loop(bot: Bot, bot_username: str = "") -> None:
             sent = await send_reminders(bot, bot_username)
             if sent:
                 logger.info("Sent %s reminders", sent)
-            registration_sent = await send_registration_notices(bot, bot_username)
-            if registration_sent:
-                logger.info("Sent %s registration notices", registration_sent)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Reminder loop failed")
         await asyncio.sleep(max(settings.reminder_check_interval_seconds, 300))
+
+
+async def registration_loop(bot: Bot, bot_username: str = "") -> None:
+    """Poll registration openings on their own fast schedule.
+
+    Registration opens at an exact moment and users expect the alert right
+    away, so this must not wait for the hourly reminder pass and keeps
+    polling through the night.
+    """
+
+    await asyncio.sleep(5)
+    while True:
+        try:
+            sent = await send_registration_notices(bot, bot_username)
+            if sent:
+                logger.info("Sent %s registration notices", sent)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Registration loop failed")
+        await asyncio.sleep(
+            max(settings.registration_check_interval_seconds, 30)
+        )

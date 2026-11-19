@@ -853,6 +853,7 @@ class CatalogService:
         self._refresh_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task[None] | None = None
         self._scheduler_task: asyncio.Task[None] | None = None
+        self._enrichment_offsets: dict[tuple[str, tuple[int, ...]], int] = {}
         self._featured_store = FeaturedEventStore(settings.featured_events_file)
         self._load_persistent_cache()
 
@@ -948,6 +949,7 @@ class CatalogService:
             events_to_enrich, remaining_events = self._split_events_for_enrichment(
                 source_events,
                 settings.max_enrich_events_per_source,
+                source_name=source_config.name,
             )
             try:
                 enriched_events = await asyncio.wait_for(
@@ -955,6 +957,11 @@ class CatalogService:
                     timeout=settings.enrich_timeout_seconds,
                 )
             except TimeoutError:
+                logger.warning(
+                    "Enrichment timed out for %s after %ss; using unenriched data",
+                    source_config.name,
+                    settings.enrich_timeout_seconds,
+                )
                 enriched_events = events_to_enrich
             except Exception:
                 enriched_events = events_to_enrich
@@ -965,6 +972,8 @@ class CatalogService:
         self,
         events: list[Event],
         limit: int,
+        *,
+        source_name: str = "",
     ) -> tuple[list[Event], list[Event]]:
         if limit <= 0 or not events:
             return [], events
@@ -976,10 +985,32 @@ class CatalogService:
                 item[0],
             ),
         )
-        selected_indexes = {
-            index
-            for index, _event in prioritized[: min(limit, len(events))]
-        }
+
+        # Group equally important events and rotate the window inside each
+        # group. Without rotation a fixed slice of a large source (Orgeo,
+        # RaceTime, ...) is enriched on every refresh while the rest never is,
+        # so a registration opening could stay invisible for days.
+        groups: dict[tuple[int, ...], list[int]] = {}
+        for index, event in prioritized:
+            groups.setdefault(self._enrichment_priority(event), []).append(
+                index
+            )
+
+        selected_indexes: set[int] = set()
+        for priority in sorted(groups):
+            remaining_slots = limit - len(selected_indexes)
+            if remaining_slots <= 0:
+                break
+            indexes = groups[priority]
+            offset_key = (source_name, priority)
+            offset = self._enrichment_offsets.get(offset_key, 0) % len(indexes)
+            take = min(remaining_slots, len(indexes))
+            rotated = indexes[offset:] + indexes[:offset]
+            selected_indexes.update(rotated[:take])
+            self._enrichment_offsets[offset_key] = (
+                offset + take
+            ) % len(indexes)
+
         events_to_enrich = [
             event for index, event in enumerate(events) if index in selected_indexes
         ]
@@ -988,12 +1019,26 @@ class CatalogService:
         ]
         return events_to_enrich, remaining_events
 
-    def _enrichment_priority(self, event: Event) -> tuple[int, int, int]:
+    def _enrichment_priority(self, event: Event) -> tuple[int, int, int, int, int]:
+        starts_at = _parse_iso_datetime(event.starts_at)
+        already_started = (
+            starts_at is not None
+            and starts_at.date() < datetime.now(timezone.utc).date()
+        )
         missing_date = event.starts_at is None or not event.date_text
         missing_location = event.city is None
         missing_status = not event.registration_status
+        # Events that are explicitly waiting for registration to open are the
+        # most time-sensitive: their next status change triggers an alert.
+        awaiting_registration = (
+            (event.registration_status or "").casefold() == "upcoming"
+        )
         return (
+            # Past events cannot produce registration-opening alerts and must
+            # not consume the per-source enrichment budget.
+            1 if already_started else 0,
             0 if missing_date else 1,
+            0 if awaiting_registration else 1,
             0 if missing_location else 1,
             0 if missing_status else 1,
         )

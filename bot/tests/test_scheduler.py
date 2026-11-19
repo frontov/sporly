@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.api_client import Event
+from app.config import settings
 from app.scheduler import (
     _effective_digest_hour_utc,
     _next_digest_time,
@@ -208,7 +210,6 @@ class RegistrationNoticeDeliveryTest(unittest.IsolatedAsyncioTestCase):
         refresh_favorite = AsyncMock(return_value=True)
 
         with (
-            patch.object(scheduler, "is_quiet_hours", return_value=False),
             patch.object(
                 scheduler.database,
                 "all_favorites",
@@ -271,7 +272,6 @@ class RegistrationNoticeDeliveryTest(unittest.IsolatedAsyncioTestCase):
         refresh_favorite = AsyncMock(return_value=True)
 
         with (
-            patch.object(scheduler, "is_quiet_hours", return_value=False),
             patch.object(
                 scheduler.database,
                 "all_favorites",
@@ -547,6 +547,54 @@ class SeenIdentityTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(sent, 0)
         send.assert_not_awaited()
+
+
+class RegistrationLoopTest(unittest.IsolatedAsyncioTestCase):
+    async def test_polls_registration_on_its_own_fast_schedule(self) -> None:
+        notices = AsyncMock(return_value=1)
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            if len(sleeps) >= 2:
+                raise asyncio.CancelledError
+
+        with (
+            patch.object(scheduler, "is_quiet_hours", return_value=False),
+            patch.object(scheduler, "send_registration_notices", notices),
+            patch.object(scheduler.asyncio, "sleep", fake_sleep),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await scheduler.registration_loop(AsyncMock(), "sporly_bot")
+
+        notices.assert_awaited_once()
+        self.assertEqual(
+            sleeps[1],
+            max(settings.registration_check_interval_seconds, 30),
+        )
+
+    async def test_polls_registration_through_quiet_hours(self) -> None:
+        notices = AsyncMock(return_value=1)
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            if len(sleeps) >= 2:
+                raise asyncio.CancelledError
+
+        with (
+            patch.object(scheduler, "is_quiet_hours", return_value=True),
+            patch.object(scheduler, "send_registration_notices", notices),
+            patch.object(scheduler.asyncio, "sleep", fake_sleep),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await scheduler.registration_loop(AsyncMock(), "sporly_bot")
+
+        notices.assert_awaited_once()
+        self.assertEqual(
+            sleeps[1],
+            max(settings.registration_check_interval_seconds, 30),
+        )
 
 
 if __name__ == "__main__":

@@ -34,7 +34,12 @@ from app.handlers import (
 from app.filter_wizard import router as filter_router
 from app.fsm_storage import SQLiteFSMStorage
 from app.redirect_server import start_redirect_server
-from app.scheduler import digest_loop, notification_loop, reminder_loop
+from app.scheduler import (
+    digest_loop,
+    notification_loop,
+    registration_loop,
+    reminder_loop,
+)
 
 
 logging.basicConfig(
@@ -154,6 +159,9 @@ async def main() -> None:
             ),
             asyncio.create_task(digest_loop(bot, bot_username), name="digest"),
             asyncio.create_task(reminder_loop(bot, bot_username), name="reminders"),
+            asyncio.create_task(
+                registration_loop(bot, bot_username), name="registration"
+            ),
         ]
 
         @dp.errors()

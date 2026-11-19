@@ -26,9 +26,13 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 900
     digest_hour_utc: int = 6
     reminder_check_interval_seconds: int = 3600
+    # Opening a registration is time-sensitive, so it is polled far more
+    # often than reminders.
+    registration_check_interval_seconds: int = 60
     max_notifications_per_tick: int = 12
-    # Quiet hours are in Moscow time. Outside this window the bot sends
-    # nothing proactively: no new-event digests and no reminders.
+    # Quiet hours are in Moscow time. Outside this window the bot sends no
+    # new-event digests and no reminders. Registration openings are the
+    # exception: they are time-sensitive and delivered around the clock.
     quiet_hours_start: int = 22
     quiet_hours_end: int = 9
     drop_pending_updates: bool = False

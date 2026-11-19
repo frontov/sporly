@@ -156,6 +156,54 @@ class CatalogLifecycleTest(unittest.TestCase):
         self.assertEqual([event.id for event in selected], [without_status.id])
         self.assertEqual([event.id for event in remaining], [with_status.id])
 
+    def test_upcoming_events_are_checked_before_statusless_ones(self) -> None:
+        upcoming = make_event(1, starts_at="2027-01-01T00:00:00")
+        upcoming.registration_status = "upcoming"
+        statusless = make_event(2, starts_at="2027-01-01T00:00:00")
+
+        selected, remaining = self.service._split_events_for_enrichment(
+            [statusless, upcoming], 1, source_name="S"
+        )
+
+        self.assertEqual([event.id for event in selected], [upcoming.id])
+        self.assertEqual([event.id for event in remaining], [statusless.id])
+
+    def test_future_events_are_enriched_before_past_ones(self) -> None:
+        past = make_event(1, starts_at="2026-01-01T00:00:00")
+        past.registration_status = None
+        future = make_event(2, starts_at="2027-01-01T00:00:00")
+        future.registration_status = "upcoming"
+
+        selected, remaining = self.service._split_events_for_enrichment(
+            [past, future], 1, source_name="S"
+        )
+
+        self.assertEqual([event.id for event in selected], [future.id])
+        self.assertEqual([event.id for event in remaining], [past.id])
+
+    def test_enrichment_rotates_through_equally_important_events(self) -> None:
+        events = [
+            make_event(
+                index, source="S", starts_at="2027-01-01T00:00:00"
+            )
+            for index in range(1, 5)
+        ]
+        batches = []
+        for _ in range(3):
+            selected, _ = self.service._split_events_for_enrichment(
+                events, 2, source_name="S"
+            )
+            batches.append([event.id for event in selected])
+
+        self.assertEqual(
+            batches,
+            [
+                ["S-1", "S-2"],
+                ["S-3", "S-4"],
+                ["S-1", "S-2"],
+            ],
+        )
+
     def test_event_id_drops_listing_index(self) -> None:
         event = make_event(
             0,
